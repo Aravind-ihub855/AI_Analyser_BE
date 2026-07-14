@@ -16,3 +16,4 @@ class ChatResponse(BaseModel):
     reportData: Optional[str] = None
     dashboardData: Optional[Dict[str, Any]] = None
     voice_enabled: bool = True
+    metadata: Optional[Dict[str, Any]] = None

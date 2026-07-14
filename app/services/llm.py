@@ -3,6 +3,7 @@ import httpx
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq   
+from langchain_mistralai import ChatMistralAI
 
 from pathlib import Path
 
@@ -29,6 +30,19 @@ async def call_gptoss_ai(prompt: str) -> str:
                 return f"Error: Custom AI service returned status {response.status_code}"
         except Exception as e:
             return f"Error: Unable to connect to custom AI service. {str(e)}"
+
+# --- MISTRAL AI ---
+def get_mistral_llm(api_key: str = None):
+    """Configure Mistral LLM with hardcoded settings or provided key."""
+    key_to_use = api_key if api_key else os.getenv("MISTRAL_API_KEY")
+    if not key_to_use:
+        raise ValueError("Mistral API key not set in environment.")
+    return ChatMistralAI(
+        model="mistral-medium-2505",
+        api_key=key_to_use,
+        temperature=0.7,
+        max_tokens=32768,
+    )
 
 # --- GROQ AI ---
 def get_groq_llm(model: str = "openai/gpt-oss-120b", temperature: float = 0, top_p: float = 1.0):

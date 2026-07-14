@@ -3,7 +3,7 @@ from bson import ObjectId
 import datetime
 
 # Database and Collection for Chat History
-DB_NAME = "Fintech_AI_Analyser"
+DB_NAME = "BP"
 COLLECTION_NAME = "chat_history"
 history_collection = client[DB_NAME][COLLECTION_NAME]
 

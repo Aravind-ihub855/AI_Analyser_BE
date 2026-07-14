@@ -9,7 +9,9 @@ import hmac
 from bson import ObjectId
 from app.config.database import client
 
-DB_NAME = "Fintech_AI_Analyser"
+import bcrypt
+
+DB_NAME = "BP"
 COLLECTION_NAME = "users"
 users_collection = client[DB_NAME][COLLECTION_NAME]
 
@@ -17,15 +19,17 @@ SECRET_KEY = os.getenv("JWT_SECRET_KEY", "super-secret-key-change-me-1234567890"
 
 # --- HASHING UTILS ---
 def hash_password(password: str) -> str:
-    # Generate a random 16-byte salt
-    salt = os.urandom(16)
-    # Perform 100,000 iterations of PBKDF2 HMAC SHA-256
-    pwd_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, 100000)
-    # Store both salt and hash as hex
-    return f"{salt.hex()}:{pwd_hash.hex()}"
+    # Use bcrypt to hash passwords
+    salt = bcrypt.gensalt(12)
+    return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
 
 def verify_password(stored_password: str, provided_password: str) -> bool:
     try:
+        # Check if stored_password is standard bcrypt hash (e.g. starts with $2b$ or $2a$)
+        if stored_password.startswith("$2") or stored_password.startswith("$2b$"):
+            return bcrypt.checkpw(provided_password.encode('utf-8'), stored_password.encode('utf-8'))
+            
+        # Fallback for old custom PBKDF2 hashes
         salt_hex, hash_hex = stored_password.split(":")
         salt = bytes.fromhex(salt_hex)
         expected_hash = bytes.fromhex(hash_hex)
@@ -99,6 +103,8 @@ async def get_user_by_email(email: str) -> dict:
     user = await users_collection.find_one({"email": email.lower()})
     if user:
         user["id"] = str(user["_id"])
+        # Map hashed_password to password for verify_password
+        user["password"] = user.get("hashed_password")
         return user
     return None
 
@@ -107,6 +113,7 @@ async def get_user_by_id(user_id: str) -> dict:
         user = await users_collection.find_one({"_id": ObjectId(user_id)})
         if user:
             user["id"] = str(user["_id"])
+            user["password"] = user.get("hashed_password")
             return user
     except Exception:
         pass

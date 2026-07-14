@@ -19,20 +19,22 @@ from app.services.user_usage import (
     increment_user_used_tokens,
     ensure_usage_quota_available,
 )
+from .agent_orchestrator import AgentOrchestrator
 
 load_dotenv()
 llm = get_groq_llm()
+orchestrator = AgentOrchestrator()
 
 router = APIRouter()
 
 # Set up logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_DIR = os.path.join(BASE_DIR, "db")
 os.makedirs(DB_DIR, exist_ok=True)
-DB_PATH = os.path.join(DB_DIR, "invoices.db") # Use a fixed DB name
+DB_PATH = os.path.join(DB_DIR, "store_ops.db") # Use store ops DB name
 
 # Global variable to track current DB path
 current_db_path = DB_PATH
@@ -65,9 +67,9 @@ def _get_dataset_preview() -> List[List]:
         
         conn = sqlite3.connect(current_db_path)
         cursor = conn.cursor()
-        cursor.execute("PRAGMA table_info(data)")
+        cursor.execute("PRAGMA table_info(inventory)")
         columns = [col[1] for col in cursor.fetchall()]
-        df = pd.read_sql_query("SELECT * FROM data LIMIT 20", conn)
+        df = pd.read_sql_query("SELECT * FROM inventory LIMIT 20", conn)
         conn.close()
         
         # Replace NaN/inf with None for JSON compliance
@@ -466,8 +468,8 @@ async def aisheets_query(
     conversation: List[str] = Form(default_factory=list),
     current_user: dict = Depends(get_current_user)
 ):
-    """Handles user queries against the currently loaded dataset."""
-    return await process_query(query, conversation, current_user)
+    """Handles user queries against the store operations database using the orchestrator."""
+    return await orchestrator.process(query, conversation)
 
 @router.post("/sync-now")
 async def sync_now(current_user: dict = Depends(get_current_user)):

@@ -43,21 +43,14 @@ from bson import ObjectId
 
 # Mapping MongoDB collections to SQLite tables by Database
 COLLECTIONS_MAP = {
-    "Fintech_AI_Analyser": {
-        "budget": "budget",
-        "customers": "customers",
-        "departments": "departments",
-        "organization": "organization",
+    "BP": {
         "products": "products",
-        "projects": "projects",
         "purchase_orders": "purchase_orders",
-        "purchase_requests": "purchase_requests",
-        "sales_invoices": "sales_invoices",
-        "sales_orders": "sales_orders",
-        "users": "users",
-        "vendor_invoices": "vendor_invoices",
-        "vendor_payments": "vendor_payments",
-        "vendors": "vendors"
+        "vendors": "vendors",
+        "stores": "stores",
+        "inventory": "inventory",
+        "vendor_issues": "vendor_issues",
+        "recommendations": "recommendations"
     }
 }
 

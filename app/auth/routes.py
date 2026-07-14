@@ -26,13 +26,23 @@ async def signup(req: SignupRequest):
         raise HTTPException(status_code=400, detail="User with this email already exists")
         
     # Generate token
-    token = generate_token({"id": user["id"], "email": user["email"], "name": user["name"]})
+    token = generate_token({
+        "id": user["id"], 
+        "email": user["email"], 
+        "name": user["name"],
+        "role": user.get("role", "store manager"),
+        "storeId": user.get("storeId"),
+        "region": user.get("region")
+    })
     return {
         "token": token,
         "user": {
             "id": user["id"],
             "email": user["email"],
-            "name": user["name"]
+            "name": user["name"],
+            "role": user.get("role", "store manager"),
+            "storeId": user.get("storeId"),
+            "region": user.get("region")
         }
     }
 
@@ -49,12 +59,22 @@ async def login(req: LoginRequest):
         raise HTTPException(status_code=401, detail="Invalid email or password")
         
     # Generate token
-    token = generate_token({"id": user["id"], "email": user["email"], "name": user["name"]})
+    token = generate_token({
+        "id": user["id"], 
+        "email": user["email"], 
+        "name": user["name"],
+        "role": user.get("role", "store manager"),
+        "storeId": user.get("storeId"),
+        "region": user.get("region")
+    })
     return {
         "token": token,
         "user": {
             "id": user["id"],
             "email": user["email"],
-            "name": user["name"]
+            "name": user["name"],
+            "role": user.get("role", "store manager"),
+            "storeId": user.get("storeId"),
+            "region": user.get("region")
         }
     }
