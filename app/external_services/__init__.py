@@ -1,0 +1,6 @@
+# app/external_services package
+from app.external_services.web_search import search_web
+from app.external_services.weather_service import get_weather
+from app.external_services.competitor_pricing import get_competitor_pricing
+from app.external_services.event_tracker import get_local_events
+from app.external_services.market_trends import get_market_trend

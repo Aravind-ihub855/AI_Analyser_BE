@@ -13,7 +13,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # Remote MongoDB configuration
-REMOTE_MONGO_URI = "mongodb+srv://pf1testt_db_user:pf1testt@cluster0.byyw0c1.mongodb.net/BP"
+REMOTE_MONGO_URI = os.getenv("MONGO_URI")
 DB_NAME = "BP"
 
 def clean_column_name(col: str) -> str:

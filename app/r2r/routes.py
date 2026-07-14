@@ -22,6 +22,9 @@ async def sync_db(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+from fastapi.responses import StreamingResponse
+import json
+
 @router.post("/chat", response_model=ChatResponse)
 async def ask_ai(request: QuestionRequest, current_user: dict = Depends(get_current_user)):
     try:
@@ -51,6 +54,18 @@ async def ask_ai(request: QuestionRequest, current_user: dict = Depends(get_curr
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/chat/stream")
+async def ask_ai_stream(request: QuestionRequest, current_user: dict = Depends(get_current_user)):
+    """Streams token chunks and metadata logs via Server-Sent Events (SSE)."""
+    async def sse_generator():
+        try:
+            async for chunk in orchestrator.process_stream(request.question, request.chat_context, current_user):
+                yield f"data: {chunk}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            
+    return StreamingResponse(sse_generator(), media_type="text/event-stream")
 
 @router.get("/chats")
 async def list_user_chats(current_user: dict = Depends(get_current_user)):

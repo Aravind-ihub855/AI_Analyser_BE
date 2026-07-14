@@ -8,7 +8,13 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
-from ddgs import DDGS
+try:
+    from duckduckgo_search import DDGS
+except ImportError:
+    class DDGS:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def text(self, *args, **kwargs): return []
 import urllib.parse
 try:
     from serpapi import GoogleSearch
