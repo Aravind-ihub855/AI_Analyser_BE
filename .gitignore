@@ -1,0 +1,44 @@
+
+# -------------------------
+# Python / FastAPI
+# -------------------------
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.env
+.venv/
+env/
+venv/
+ENV/
+
+# Distribution / packaging
+*.egg-info/
+.eggs/
+build/
+develop-eggs/
+dist/
+pip-wheel-metadata/
+.installed.cfg
+
+# Testing
+.coverage
+htmlcov/
+.tox/
+.pytest_cache/
+nosetests.xml
+coverage.xml
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+
+# -------------------------
+# Common
+# -------------------------
+# OS files
+Thumbs.db
