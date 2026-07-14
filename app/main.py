@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.ai_analyzer.agentMain import router as ai_analyzer_router
 from app.r2r.routes import router as r2r_router
 from app.auth.routes import router as auth_router
+from app.streaming import streaming_router, streaming_engine
 import uvicorn
 import os
 
@@ -21,6 +22,15 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(ai_analyzer_router, prefix="/ai-analyzer", tags=["ai-analyzer"])
 app.include_router(r2r_router)
+app.include_router(streaming_router)
+
+@app.on_event("startup")
+async def startup_event():
+    await streaming_engine.start()
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await streaming_engine.stop()
 
 @app.get("/")
 async def root():
