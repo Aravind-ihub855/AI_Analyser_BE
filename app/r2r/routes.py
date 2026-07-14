@@ -6,6 +6,7 @@ from app.shared.authMiddleware import get_current_user
 from app.ai_analyzer.agent_orchestrator import AgentOrchestrator
 from app.ai_analyzer.db_sync import sync_mongodb_to_sqlite
 import os
+import sqlite3
 
 router = APIRouter(prefix="/r2r", tags=["Chat"])
 
@@ -21,6 +22,20 @@ async def sync_db(current_user: dict = Depends(get_current_user)):
         return {"message": "Data synchronized successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/stores/{store_id}/name")
+async def get_store_name(store_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM stores WHERE id = ?", (store_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            return {"name": row[0]}
+        return {"name": store_id}
+    except Exception as e:
+        return {"name": store_id}
 
 from fastapi.responses import StreamingResponse
 import json
@@ -140,6 +155,8 @@ async def add_message(payload: dict = Body(...), current_user: dict = Depends(ge
         chartData = payload.get("chartData")
         reportData = payload.get("reportData")
         dashboardData = payload.get("dashboardData")
+        tools_used = payload.get("tools_used")
+        metadata = payload.get("metadata")
         
         details = await chat_history.get_chat_details(chat_id)
         if not details:
@@ -149,7 +166,8 @@ async def add_message(payload: dict = Body(...), current_user: dict = Depends(ge
             
         await chat_history.save_chat_message(
             chat_id, role, content, 
-            tableData, chartData, reportData, dashboardData
+            tableData, chartData, reportData, dashboardData,
+            tools_used, metadata
         )
         return {"status": "success"}
     except HTTPException:

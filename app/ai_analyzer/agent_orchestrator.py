@@ -1318,6 +1318,13 @@ class AgentOrchestrator:
             full_text += content
             yield json.dumps({"type": "token", "text": content})
 
+        prompt_tokens = max(1, int(len(synthesis_prompt) / 3.7))
+        completion_tokens = max(1, int(len(full_text) / 3.7))
+        total_tokens = prompt_tokens + completion_tokens
+
+        logger.info(f"[MODEL] Model used: {self.active_model}")
+        logger.info(f"[TOKENS] Prompt: {prompt_tokens} | Completion: {completion_tokens} | Total: {total_tokens}")
+
         visualization = None
         report_markdown = None
         
@@ -1334,5 +1341,10 @@ class AgentOrchestrator:
             "chartData": visualization,
             "reportData": report_markdown,
             "tools_used": tools_used,
-            "model_name": self.active_model
+            "model_name": self.active_model,
+            "token_usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens
+            }
         })

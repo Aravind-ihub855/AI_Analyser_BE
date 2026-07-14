@@ -42,7 +42,7 @@ async def update_chat_title(chat_id: str, new_title: str):
     )
     return True
 
-async def save_chat_message(chat_id: str, role: str, content: str, tableData=None, chartData=None, reportData=None, dashboardData=None):
+async def save_chat_message(chat_id: str, role: str, content: str, tableData=None, chartData=None, reportData=None, dashboardData=None, tools_used=None, metadata=None):
     """Appends a new message to the chat session."""
     message_obj = {
         "role": role,
@@ -54,6 +54,8 @@ async def save_chat_message(chat_id: str, role: str, content: str, tableData=Non
     if chartData: message_obj["chartData"] = chartData
     if reportData: message_obj["reportData"] = reportData
     if dashboardData: message_obj["dashboardData"] = dashboardData
+    if tools_used: message_obj["tools_used"] = tools_used
+    if metadata: message_obj["metadata"] = metadata
 
     await history_collection.update_one(
         {"_id": ObjectId(chat_id)},

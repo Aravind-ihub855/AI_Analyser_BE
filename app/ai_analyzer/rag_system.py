@@ -9,8 +9,8 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # Config files
-APP_DATA_DIR = r"C:\Users\HP\.gemini\antigravity-ide\brain\baa0c5e4-4394-4ff3-be4e-a1a5ec181a62"
-RAG_STORE_PATH = os.path.join(APP_DATA_DIR, "scratch", "rag_store.json")
+RAG_STORE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+RAG_STORE_PATH = os.path.join(RAG_STORE_DIR, "rag_store.json")
 
 KNOWLEDGE_BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge_base")
 
