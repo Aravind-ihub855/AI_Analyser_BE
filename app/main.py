@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.ai_analyzer.agentMain import router as ai_analyzer_router
 from app.r2r.routes import router as r2r_router
+from app.auth.routes import router as auth_router
 import uvicorn
 import os
 
@@ -17,6 +18,7 @@ app.add_middleware(
 )
 
 # Register routers
+app.include_router(auth_router)
 app.include_router(ai_analyzer_router, prefix="/ai-analyzer", tags=["ai-analyzer"])
 app.include_router(r2r_router)
 

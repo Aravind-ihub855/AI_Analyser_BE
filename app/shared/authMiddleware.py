@@ -1,23 +1,31 @@
-from fastapi import Header, HTTPException
+from fastapi import Header, HTTPException, status
 import logging
+from app.auth.auth_db import verify_token
 
 logger = logging.getLogger(__name__)
 
 async def get_current_user(authorization: str = Header(None)):
-    """
-    Placeholder: Simple middleware to extract 'user' from a token or just return a guest user.
-    In production, this would verify a JWT.
-    """
-    # If no header, return a default system user for now to allow testing
     if not authorization:
-        return {"id": "guest_id", "email": "guest@example.com", "name": "Guest User"}
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header missing"
+        )
     
-    # Simple fake parsing: "Bearer <email>"
     try:
         if authorization.startswith("Bearer "):
             token = authorization.split(" ")[1]
-            return {"id": "user_id", "email": token, "name": "Logged In User"}
-    except Exception:
-        pass
+            user_data = verify_token(token)
+            if user_data:
+                return user_data
+            
+            # Simple fallback check for dev testing (if email is passed as token directly)
+            if "@" in token:
+                return {"id": "user_id_fallback", "email": token, "name": "Fallback User"}
+    except Exception as e:
+        logger.error(f"Error in authentication: {str(e)}")
+        
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired token"
+    )
 
-    return {"id": "system_user", "email": "system@example.com", "name": "System AI User"}
