@@ -112,7 +112,7 @@ async def sync_mongodb_to_sqlite(db_path: str):
         # Connect to SQLite
         conn = sqlite3.connect(db_path)
         
-        collections = ['products', 'purchase_orders', 'vendors', 'stores', 'inventory', 'vendor_issues', 'recommendations']
+        collections = ['products', 'purchase_orders', 'vendors', 'stores', 'inventory', 'vendor_issues', 'recommendations', 'purchase_history']
         
         inventory_docs = []
         

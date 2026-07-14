@@ -12,63 +12,53 @@ logger = logging.getLogger(__name__)
 APP_DATA_DIR = r"C:\Users\HP\.gemini\antigravity-ide\brain\baa0c5e4-4394-4ff3-be4e-a1a5ec181a62"
 RAG_STORE_PATH = os.path.join(APP_DATA_DIR, "scratch", "rag_store.json")
 
-RAG_DOCS = [
-    {
-        "title": "Cold Chain & Refrigeration Temperature Policy",
-        "category": "Food Safety",
-        "content": """Standard Operating Procedure (SOP) for Wild Bean Cafe Cold Chain:
-        All refrigeration units storing milk, fresh sandwiches, and other dairy items must maintain temperatures strictly between 1.0°C and 4.0°C.
-        If a refrigeration unit temp sensor reports between 4.1°C and 5.0°C, a 'Warning' status is triggered, requiring a visual inspection within 30 minutes.
-        If a refrigeration unit temp exceeds 5.0°C for more than 30 consecutive minutes, a 'Critical' alarm is activated. All fresh products must be moved to an alternative freezer or discarded immediately if left for more than 1 hour, and a service technician must be dispatched immediately.
-        Records of temperature inspections must be kept for 3 months for audit compliance."""
-    },
-    {
-        "title": "Fuel Spill Emergency Response Plan",
-        "category": "Safety & Environment",
-        "content": """Emergency Response Plan for Fuel Spills on Forecourt:
-        Minor Spills (under 5 Litres):
-        1. Immediately stop the fuel dispenser using the safety switch.
-        2. Apply spill kit absorbent powder/kitty litter over the spill.
-        3. Sweep up the absorbent and place it in the designated hazardous waste bin. Do not wash fuel into storm drains.
-        
-        Major Spills (over 5 Litres):
-        1. Immediately press the Emergency Stop Button (E-Stop) to isolate all dispensers.
-        2. Evacuate the forecourt and cordon off the area.
-        3. Dispatch fire extinguishers if a fire hazard is present.
-        4. Contact the emergency services (911 / Fire department) and the BP incident response hotline at 1800-555-SAFE.
-        5. Log the incident in the compliance logs within 2 hours."""
-    },
-    {
-        "title": "Store Procurement & Auto-Reordering Guidelines",
-        "category": "Inventory Management",
-        "content": """BP Store Automatic Reordering Policy:
-        Inventory is monitored daily. Reorder point (ROL) triggers automatic purchase order generation.
-        The Reorder Point (ROL) is calculated as: ROL = (Average Daily Consumption * Lead Time in Days) + Safety Stock Level.
-        When the stock level falls below ROL, a PO is triggered automatically with a Reorder Quantity (ROQ) calculated as: ROQ = Capacity - Stock Level.
-        Pending orders must be reviewed by the Store Manager before final sign-off.
-        If a vendor delivery is delayed and the product reaches critical risk level (stock < safety stock), the Store Manager must trigger a vendor escalation ticket."""
-    },
-    {
-        "title": "Shift Handover and Cash Audit SOP",
-        "category": "Store Operations",
-        "content": """Standard Operating Procedure for Shift Handover & Reconciliation:
-        At the end of each shift (Morning: 6 AM - 2 PM, Evening: 2 PM - 10 PM, Night: 10 PM - 6 AM):
-        1. Complete a POS till cash count. Discrepancies exceeding $5.00 must be reported to the Store Manager.
-        2. Verify that all safe drops are logged in the drop safe logs.
-        3. Conduct a physical stock count of high-value items (tobacco, phone cards, lottery).
-        4. Clean the Wild Bean Cafe coffee machines using the auto-clean cycle.
-        5. Log key handovers in the manager's diary."""
-    },
-    {
-        "title": "Fuel Leakage Detection Procedures",
-        "category": "Compliance & Safety",
-        "content": """Fuel Tank Leakage and Reconciliation Policy:
-        Underground storage tanks (USTs) utilize Automatic Tank Gauging (ATG) systems.
-        ATG checks for pressure drops and water intrusion in fuel lines.
-        Daily Wet Stock Reconciliation: Store Managers must record fuel inventory reconciliation reports daily, comparing ATG readings against pump sales.
-        If the Daily Variance exceeds 0.5% of total throughput for 3 consecutive days, a suspected leak alarm is triggered. The manager must contact compliance officers and arrange testing within 24 hours."""
-    }
-]
+KNOWLEDGE_BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge_base")
+
+def load_docs_from_files() -> list:
+    """Dynamically loads and parses markdown files from the knowledge base directory."""
+    docs = []
+    if not os.path.exists(KNOWLEDGE_BASE_DIR):
+        logger.warning(f"Knowledge base directory '{KNOWLEDGE_BASE_DIR}' not found. Returning empty list.")
+        return []
+
+    logger.info(f"Scanning knowledge base directory: {KNOWLEDGE_BASE_DIR}")
+    for filename in os.listdir(KNOWLEDGE_BASE_DIR):
+        if filename.endswith(".md") or filename.endswith(".txt"):
+            filepath = os.path.join(KNOWLEDGE_BASE_DIR, filename)
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                # Derive a pretty manual title (e.g. "📘 BP Store Operations Manual")
+                manual_title = "BP Manual"
+                first_line = content.split('\n')[0].strip()
+                if first_line.startswith("# "):
+                    manual_title = first_line.replace("# ", "").strip()
+                
+                # Split by section headings ("## ") to index independent sections
+                sections = content.split("\n## ")
+                header_context = sections[0].strip()
+                
+                for sec in sections[1:]:
+                    lines = sec.split("\n")
+                    sec_title = lines[0].strip()
+                    sec_body = "\n".join(lines[1:]).strip()
+                    
+                    full_title = f"{manual_title} - {sec_title}"
+                    category = manual_title.replace("📘 ", "").replace("📗 ", "").replace("📙 ", "").replace("📕 ", "").replace("📒 ", "").strip()
+                    
+                    docs.append({
+                        "title": full_title,
+                        "category": category,
+                        "content": f"Source: {manual_title}\nSection: {sec_title}\n\nContext:\n{header_context}\n\nRules & Regulations:\n{sec_body}"
+                    })
+            except Exception as e:
+                logger.error(f"Error reading RAG document '{filename}': {e}")
+                
+    logger.info(f"Dynamically loaded {len(docs)} sections from knowledge base directory.")
+    return docs
+
+RAG_DOCS = load_docs_from_files()
 
 class RAGSystem:
     def __init__(self):
@@ -86,9 +76,12 @@ class RAGSystem:
                 logger.info("Loading RAG store index from cache...")
                 with open(RAG_STORE_PATH, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    self.db_docs = data["docs"]
-                    self.embeddings_matrix = np.array(data["embeddings"])
-                return
+                    if len(data.get("docs", [])) == len(RAG_DOCS):
+                        self.db_docs = data["docs"]
+                        self.embeddings_matrix = np.array(data["embeddings"])
+                        return
+                    else:
+                        logger.info("RAG doc count mismatch. Rebuilding index...")
         except Exception as e:
             logger.warning(f"Failed to load cached RAG store: {e}. Rebuilding...")
 
@@ -150,5 +143,8 @@ if __name__ == "__main__":
     rag = RAGSystem()
     results = rag.search("what is the temp limit for milk in cafe?")
     for r in results:
-        print(f"Score: {r['score']:.4f} | Title: {r['doc']['title']}")
-        print(r['doc']['content'][:200] + "...\n")
+        # Safely print on Windows terminal ignoring non-ASCII characters if not supported
+        title_safe = r['doc']['title'].encode('ascii', errors='replace').decode('ascii')
+        content_safe = r['doc']['content'][:200].encode('ascii', errors='replace').decode('ascii')
+        print(f"Score: {r['score']:.4f} | Title: {title_safe}")
+        print(content_safe + "...\n")

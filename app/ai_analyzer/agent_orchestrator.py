@@ -120,6 +120,18 @@ Available SQLite Tables and Columns:
    - price (REAL)
    - total_amount (REAL)
    - payment_method (TEXT)
+
+9. Table 'purchase_history':
+   - id (TEXT, unique mongo ID)
+   - purchase_id (TEXT, e.g. 'PUR-20260714115928-8525')
+   - store_id (TEXT, matches stores.id)
+   - customer_id (TEXT, e.g. 'CUS-0021')
+   - customer_name (TEXT, e.g. 'Noah Surname1')
+   - items (TEXT, JSON array of purchased items, e.g. '[{"product_code": "BP-PROD-081", "product_name": "Milk", "category": "Grocery", "quantity": 1, "unit_price": 28.99, "total_price": 28.99}]')
+   - total_amount (REAL, total purchase cost)
+   - item_count (INTEGER, total items in purchase)
+   - purchase_timestamp (TEXT/TIMESTAMP, purchase date/time, e.g. '2026-07-14 11:59:28')
+   - payment_method (TEXT, e.g. 'Credit Card', 'Debit Card')
 """
 
 class AgentOrchestrator:
@@ -148,23 +160,45 @@ class AgentOrchestrator:
         """Determines the routing category and planning steps."""
         logger.info(f"[INTENT AGENT] Parsing user query: '{query[:80]}...' " if len(query) > 80 else f"[INTENT AGENT] Parsing user query: '{query}'")
         prompt = f"""
-        You are the Intent and Planning Agent for a BP Store Manager AI Copilot.
         Analyze the user's operational query and categorize it into one of these categories:
-        - "db": Questions needing database stats, inventory, POs, vendors, sales, or product analysis.
-        - "rag": Questions about operating guidelines, SOPs, safety response plans, compliance, HR, cash reconciliations.
+        - "db": Questions needing database stats, inventory, POs, vendors, sales, product analysis, store profile highlights, or KPI metrics summaries (e.g., total products count, inventory valuation, stockout counts, reorder status, or overdue purchase orders).
+        - "rag": Questions about operating guidelines, SOPs, safety response plans, compliance, HR, cash reconciliations. Do NOT route store profile/performance highlights here.
         - "live": Questions about active IoT sensor readings (temperature check, leakage check).
         - "external": Questions that need competitor pricing, local/public events near the store, national market trends (inflation, oil prices, FRED), current weather for cities/regions, or any general web search queries.
         - "workflow": Action requests (e.g. reordering items, updates, creating escalation tickets).
         - "conversational": Greetings, small talk, general questions unrelated to store operations.
+        - "agentic": Complex queries that require checking multiple distinct sources of information (e.g. checking weather + inventory stock levels, comparing competitor prices + checking local catalog, events + sales trends).
+
+        Available Database Schema context for deciding "db" queries:
+        {DB_SCHEMA_REFERENCE}
+
+        Classification Instructions:
+        1. GREETINGS & CASUAL PREFIXES: If the user query contains greetings (e.g. "hi", "hello", "hey", "good morning") but ALSO contains an operational planning or lookup question (e.g. "wheather I can plan for...", "can you check...", "what is the stock..."), you MUST ignore the greeting and categorize the core operational request. Do NOT classify it as "conversational" if there is any operational request present!
+        2. TYPO ROBUSTNESS: Treat common typos like "wheather" or "weather" as "whether" when introducing a question (e.g., "wheather i can plan..." -> "whether i can plan..."), "selled" as "sold", etc.
+        3. COMPREHENSIVE AGENTIC PLANNING: Any request about whether the manager can plan sales or carry items (e.g., "can I plan for chicken noodles", "planning jacket sales") requires a comprehensive check of all operational tools. You MUST route these queries to the "agentic" category and construct a steps block that plans:
+           - A SQLite Database step ("db") to check inventory levels (current stock, ROL, lead times).
+           - A Weather forecast step ("external" with tool "weather") for the local store city to assess traffic impact.
+           - A Competitor Pricing step ("external" with tool "pricing") to check convenience/grocery pricing via Apify.
+           - A Market Trends step ("external" with tool "search" or "trends") to fetch general consumer trends or economic stats.
+        4. PLURAL/SINGULAR ROBUSTNESS IN SQL: When generating SQL query steps in the steps block (under "query"), always handle both singular and plural forms for text search (e.g. use `(name LIKE '%chicken noodle%' OR name LIKE '%chicken noodles%')` or `(name LIKE '%jacket%' OR name LIKE '%jackets%')`) so matches succeed even if there is a singular/plural variation in the product name.
+        5. STORE PROFILE & METRICS: Any questions asking for a store profile, store highlights, store performance overview, or dashboard KPI stats (e.g., "tell me the details about our store", "how is our store doing", "summarize store metrics") MUST be routed to the "db" category. This is because they require querying the database to aggregate live counts (such as total unique SKUs, total stock valuation, high-risk items, reorder limit counts, and overdue PO counts).
 
         Available Database Schema context for deciding "db" queries:
         {DB_SCHEMA_REFERENCE}
 
         Provide the output in JSON format:
         {{
-          "category": "db" | "rag" | "live" | "external" | "workflow" | "conversational",
+          "category": "db" | "rag" | "live" | "external" | "workflow" | "conversational" | "agentic",
           "plan": "One sentence describing how you will resolve this request.",
-          "is_complex": true | false
+          "is_complex": true | false,
+          "steps": [
+             // ONLY populate this array if category is "agentic". List steps sequentially.
+             // Each step has: 
+             //   "agent": "db" | "rag" | "live" | "external" | "workflow"
+             //   "query": "Strictly valid SQL query for 'db' agent (e.g. SELECT * FROM inventory WHERE (name LIKE '%chicken noodle%' OR name LIKE '%chicken noodles%')), or search query for RAG/workflow"
+             //   "tool": "Optional. Specific tool for 'external' agent: 'weather' | 'pricing' | 'events' | 'trends' | 'search'"
+             //   "param": "Optional. Parameter for external tool (e.g. city name like 'Chicago', product name like 'Monster Energy', or metric like 'inflation')"
+          ]
         }}
 
         Current Query: "{query}"
@@ -229,6 +263,32 @@ class AgentOrchestrator:
             cleaned = parts[0].strip() + ";"
         return cleaned
 
+    def _restrict_to_north_america(self, param: str, user_city: str) -> Tuple[str, bool]:
+        """Checks if the parameter is a city/country outside of North America and restricts it."""
+        intl_keywords = [
+            "london", "tokyo", "paris", "sydney", "berlin", "rome", "beijing", "seoul", 
+            "uk", "japan", "france", "australia", "germany", "china", "india", "italy", 
+            "europe", "asia", "england", "spain", "madrid", "singapore", "hong kong",
+            "moscow", "mexico city", "rio", "cairo", "toronto", "vancouver", "montreal" # Wait, Toronto/Vancouver/Montreal are in Canada (North America)! So let's allow them!
+        ]
+        # We only block cities/countries outside North America (US and Canada).
+        # Let's clean the blocklist to exclude North American locations.
+        intl_blocklist = [
+            "london", "tokyo", "paris", "sydney", "berlin", "rome", "beijing", "seoul", 
+            "uk", "japan", "france", "australia", "germany", "china", "india", "italy", 
+            "europe", "asia", "england", "spain", "madrid", "singapore", "hong kong",
+            "moscow", "cairo", "brazil", "russia", "egypt", "africa", "south america"
+        ]
+        param_str = str(param).strip()
+        param_lower = param_str.lower()
+        
+        for kw in intl_blocklist:
+            if kw in param_lower:
+                logger.warning(f"[SECURITY] Query param '{param_str}' attempted access to other countries. Restricting to North America (assigned store city: '{user_city}').")
+                return user_city, True
+                
+        return param_str, False
+
     async def generate_sql(self, query: str, history_text: str, role: str = None, store_id: str = None, region: str = None) -> str:
         """Generates a valid SQLite SQL query from natural language."""
         logger.info(f"[SQL AGENT] Generating SQL for query: '{query[:80]}...' " if len(query) > 80 else f"[SQL AGENT] Generating SQL for query: '{query}'")
@@ -258,7 +318,22 @@ class AgentOrchestrator:
         rules_block = """
         Rules:
         - Return ONLY the clean SQLite query. No markdown wrapper (do NOT wrap in ```sql).
-        - Use clean JOINs if matching products with inventory or POs.
+        - CARTESIAN PRODUCT PREVENTION: NEVER JOIN multiple one-to-many tables (such as joining both `inventory` and `purchase_orders` or `sales` to `stores` in a single flat join) when using aggregates like SUM or COUNT. This causes row multiplication, inflating counts and valuations!
+        - STORE OVERVIEW METRICS: If the user asks for store profile details and highlights (e.g. "tell me about our store", "summarize store metrics"), you MUST query the `stores` table s and calculate the metrics using independent subqueries in the SELECT clause, exactly like this:
+          SELECT 
+              s.id AS store_id, 
+              s.name AS store_name, 
+              s.city, 
+              s.address, 
+              s.contact, 
+              s.active_since, 
+              (SELECT COUNT(DISTINCT code) FROM inventory WHERE store_id = s.id) AS total_products, 
+              (SELECT SUM(current_stock * unit_price) FROM inventory WHERE store_id = s.id) AS inventory_value, 
+              (SELECT COUNT(*) FROM inventory WHERE store_id = s.id AND (current_stock * 1.0 / avg_daily_consumption) <= 7) AS critical_stockout_count, 
+              (SELECT COUNT(*) FROM inventory WHERE store_id = s.id AND current_stock <= rol) AS below_reorder_count, 
+              (SELECT COUNT(*) FROM purchase_orders WHERE store_id = s.id AND expected_delivery_date < date('now') AND status NOT IN ('Delivered', 'Cancelled')) AS overdue_orders_count
+          FROM stores s 
+          WHERE s.id = 'BP-CHI-1025'
         - Handle dates: use `date('now')` for the current date instead of CURRENT_DATE.
         - Case insensitive checks: use `LIKE` for text filters.
         - The column `avg_daily_consumption` and safety stock fields only exist in the `inventory` table, NOT the `products` table.
@@ -281,7 +356,7 @@ class AgentOrchestrator:
            - Inventory Value: `SUM(current_stock * unit_price)` in inventory.
            - Critical Stockout: Count of products where Days Left <= 7 (where Days Left = `FLOOR(current_stock / avg_daily_consumption)`).
            - Below Reorder (PR Needed): Count of products where `current_stock <= rol` (Reorder Level).
-           - Overdue Orders: Count of purchase orders where `expected_delivery_date < date('now')` AND `status NOT IN ('Delivered', 'Cancelled')` (orders past due and not yet delivered).
+           - Overdue Orders: Can be calculated as Count of purchase orders where `expected_delivery_date < date('now')` AND `status NOT IN ('Delivered', 'Cancelled')` (or products in inventory where `order_by_date < date('now')`). Use independent SELECT subqueries to compute these.
            - Safety Stock Level: `CEIL(avg_daily_consumption * 0.5 * lead_time_days)`
            - Days Left: `FLOOR(current_stock / avg_daily_consumption)`
            - Predicted Stockout Date: `date('now', '+' || (current_stock / avg_daily_consumption) || ' days')`
@@ -358,11 +433,44 @@ class AgentOrchestrator:
         # Convert history format
         history_lines = []
         for c in conversation:
-            try:
-                msg = json.loads(c) if isinstance(c, str) else c
-                history_lines.append(f"User: {msg.get('user', '')}\nAI: {msg.get('ai', '')}")
-            except Exception:
-                pass
+            if not c:
+                continue
+            parsed_dict = None
+            if isinstance(c, str):
+                c_stripped = c.strip()
+                if (c_stripped.startswith("{") and c_stripped.endswith("}")) or (c_stripped.startswith("[") and c_stripped.endswith("]")):
+                    try:
+                        parsed_dict = json.loads(c)
+                    except Exception:
+                        pass
+            elif isinstance(c, dict):
+                parsed_dict = c
+
+            if isinstance(parsed_dict, dict):
+                if "user" in parsed_dict or "ai" in parsed_dict:
+                    u = parsed_dict.get("user", "")
+                    a = parsed_dict.get("ai", "")
+                    if u or a:
+                        history_lines.append(f"User: {u}\nAI: {a}")
+                elif "role" in parsed_dict and "content" in parsed_dict:
+                    role = str(parsed_dict.get("role", "")).lower()
+                    content = parsed_dict.get("content", "")
+                    if role == "user":
+                        history_lines.append(f"User: {content}")
+                    elif role in ["assistant", "ai"]:
+                        history_lines.append(f"AI: {content}")
+            else:
+                c_str = str(c).strip()
+                if c_str.lower().startswith("user:"):
+                    history_lines.append(c_str)
+                elif c_str.lower().startswith("ai:") or c_str.lower().startswith("ai :"):
+                    suffix = c_str.split(":", 1)[1].strip()
+                    history_lines.append(f"AI: {suffix}")
+                elif c_str.lower().startswith("assistant:"):
+                    suffix = c_str.split(":", 1)[1].strip()
+                    history_lines.append(f"AI: {suffix}")
+                else:
+                    history_lines.append(c_str)
         history_text = "\n".join(history_lines)
 
         intent = await self.parse_intent(query, history_text)
@@ -373,9 +481,143 @@ class AgentOrchestrator:
         live_results = None
         workflow_executed = None
         sql_generated = None
+        external_results = None
+        tools_used = []
         
+        # 0. Agentic Multi-Step Planner
+        if category == "agentic":
+            steps = intent.get("steps", [])
+            logger.info(f"[PLANNER AGENT] Starting sequential execution of {len(steps)} steps.")
+            
+            # Resolve user's city if storeId is provided
+            user_city = "Chicago"
+            store_id = current_user.get("storeId") if current_user else None
+            if store_id:
+                try:
+                    conn = sqlite3.connect(DB_PATH)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT city FROM stores WHERE id = ?", (store_id,))
+                    row = cursor.fetchone()
+                    if row:
+                        user_city = row[0]
+                    conn.close()
+                except Exception as e:
+                    logger.warning(f"[PLANNER AGENT] Failed to fetch city for store: {e}")
+
+            db_results_list = []
+            external_results_list = []
+            rag_results_list = []
+            live_results_list = []
+            
+            for step in steps:
+                step_agent = step.get("agent")
+                tool = step.get("tool", "")
+                param = step.get("param", "") or step.get("query", "")
+                
+                # Normalize tool checks: redirect weather/pricing/events/trends to external
+                if tool in ["weather", "pricing", "events", "trends", "search"]:
+                    step_agent = "external"
+                elif step_agent == "live" and any(w in str(param).lower() or w in str(tool).lower() for w in ["weather", "temp"]):
+                    step_agent = "external"
+                    tool = "weather"
+
+                logger.info(f"[PLANNER AGENT] Executed step: agent={step_agent}, tool={tool}, param={param}")
+                
+                if step_agent == "db":
+                    sql = step.get("query")
+                    if sql:
+                        sql = self._clean_sql_query(sql)
+                        headers, rows, status = self.execute_db_query(sql)
+                        if status == "success":
+                            db_results_list.append({
+                                "sql": sql,
+                                "headers": headers,
+                                "rows": [list(r) for r in rows]
+                            })
+                            tools_used.append("SQLite Database")
+                
+                elif step_agent == "external":
+                    param, overridden = self._restrict_to_north_america(param, user_city)
+                    if tool == "weather":
+                        if not param or len(str(param).split()) > 2 or any(w in str(param).lower() for w in ["local", "current", "today", "forecast", "get"]):
+                            param = user_city
+                        from app.external_services.weather_service import get_weather
+                        try:
+                            res = await get_weather(param)
+                            external_results_list.append(f"Weather forecast for {param} (North America): {res}")
+                            tools_used.append("Weather API")
+                        except Exception as e:
+                            logger.error(f"Weather API step failed: {e}")
+                    elif tool == "pricing":
+                        if not param or len(str(param).split()) > 4:
+                            param = "Convenience retail items pricing"
+                        search_param = f"{param} in USA convenience stores"
+                        from app.external_services.competitor_pricing import get_competitor_pricing
+                        try:
+                            res = await get_competitor_pricing(search_param)
+                            external_results_list.append(f"Competitor pricing for {param} (North America): {res}")
+                            tools_used.append("Apify Pricing Scraper")
+                        except Exception as e:
+                            logger.error(f"Pricing API step failed: {e}")
+                    elif tool == "events":
+                        if not param or len(str(param).split()) > 2:
+                            param = user_city
+                        from app.external_services.event_tracker import get_local_events
+                        try:
+                            res = await get_local_events(param)
+                            external_results_list.append(f"Events near {param} (North America): {res}")
+                            tools_used.append("PredictHQ Events")
+                        except Exception as e:
+                            logger.error(f"Events API step failed: {e}")
+                    elif tool == "trends":
+                        if not param or len(str(param).split()) > 2:
+                            param = "inflation"
+                        # Make sure to query standard US series (e.g. mapping metric to US)
+                        from app.external_services.market_trends import get_market_trend
+                        try:
+                            res = await get_market_trend(param)
+                            external_results_list.append(f"Economic trends for {param} (North America): {res}")
+                            tools_used.append("FRED Economic Trends")
+                        except Exception as e:
+                            logger.error(f"Trends API step failed: {e}")
+                    else:
+                        search_param = f"{param} retail market North America"
+                        from app.external_services.web_search import search_web
+                        try:
+                            res = await search_web(search_param)
+                            external_results_list.append(f"Web search for {param} (North America): {res}")
+                            tools_used.append("Tavily Search")
+                        except Exception as e:
+                            logger.error(f"Search API step failed: {e}")
+                
+                elif step_agent == "rag":
+                    rag_docs = self.rag.search(step.get("query", query), top_k=2)
+                    for r in rag_docs:
+                        rag_results_list.append({
+                            "title": r["doc"]["title"],
+                            "content": r["doc"]["content"]
+                        })
+                    tools_used.append("SOP Guidelines (RAG)")
+                
+                elif step_agent == "live":
+                    live_results_list.append(self.get_live_sensor_readings())
+                    tools_used.append("IoT Sensors Link")
+            
+            # Combine all results
+            if db_results_list:
+                db_results = {
+                    "headers": db_results_list[0]["headers"],
+                    "rows": db_results_list[0]["rows"]
+                }
+            if external_results_list:
+                external_results = "\n\n".join(external_results_list)
+            if rag_results_list:
+                rag_results = rag_results_list
+            if live_results_list:
+                live_results = live_results_list[0]
+
         # 1. DB Agent
-        if category == "db":
+        elif category == "db":
             role = current_user.get("role") if current_user else None
             store_id = current_user.get("storeId") if current_user else None
             region = current_user.get("region") if current_user else None
@@ -388,6 +630,7 @@ class AgentOrchestrator:
                     "headers": headers,
                     "rows": [list(row) for row in rows]
                 }
+                tools_used.append("SQLite Database")
                 logger.info(f"[DB AGENT] Complete. Returned {len(rows)} row(s).")
             else:
                 db_results = {"error": status}
@@ -401,6 +644,7 @@ class AgentOrchestrator:
                 {"title": r["doc"]["title"], "category": r["doc"]["category"], "content": r["doc"]["content"], "score": r["score"]}
                 for r in rag_docs
             ]
+            tools_used.append("SOP Guidelines (RAG)")
             logger.info(f"[RAG AGENT] Retrieved {len(rag_results)} document(s).")
 
         # 3. Live IoT Agent
@@ -511,7 +755,7 @@ class AgentOrchestrator:
         - RAG Retrieval: {json.dumps(rag_results) if rag_results else "None"}
         - Live IoT Sensors: {json.dumps(live_results) if live_results else "None"}
         - Workflow Executed: {workflow_executed if workflow_executed else "None"}
-        - External Web Context: {external_results if (category == 'external' and 'external_results' in locals() and external_results) else "None"}
+        - External Web Context: {external_results if external_results else "None"}
         
         Response Guidelines:
         - Speak like an expert Store Manager Copilot. Maintain utmost professionalism and keep answers concise.
@@ -555,7 +799,7 @@ class AgentOrchestrator:
                 logger.info(f"[VIZ AGENT] Auto-generated chart: type={visualization.get('type')}, title={visualization.get('title')}")
         elif rag_results:
             report_markdown = final_answer
-        elif category == "external" and 'external_results' in locals() and external_results:
+        elif (category == "external" or category == "agentic") and external_results:
             # Show raw external details in report panel, summary in chat
             report_markdown = f"# External Query Source Details\n\nQuery: {query}\n\n{external_results}"
             
@@ -567,7 +811,8 @@ class AgentOrchestrator:
             "is_report": report_markdown is not None,
             "visualization": visualization,
             "model_name": self.active_model,
-            "token_usage": token_usage
+            "token_usage": token_usage,
+            "tools_used": tools_used
         }
 
     def _auto_visualize(self, query: str, db_results: dict) -> dict | None:
@@ -699,11 +944,44 @@ class AgentOrchestrator:
         # 1. Parse history
         history_lines = []
         for c in conversation:
-            try:
-                msg = json.loads(c) if isinstance(c, str) else c
-                history_lines.append(f"User: {msg.get('user', '')}\nAI: {msg.get('ai', '')}")
-            except Exception:
-                pass
+            if not c:
+                continue
+            parsed_dict = None
+            if isinstance(c, str):
+                c_stripped = c.strip()
+                if (c_stripped.startswith("{") and c_stripped.endswith("}")) or (c_stripped.startswith("[") and c_stripped.endswith("]")):
+                    try:
+                        parsed_dict = json.loads(c)
+                    except Exception:
+                        pass
+            elif isinstance(c, dict):
+                parsed_dict = c
+
+            if isinstance(parsed_dict, dict):
+                if "user" in parsed_dict or "ai" in parsed_dict:
+                    u = parsed_dict.get("user", "")
+                    a = parsed_dict.get("ai", "")
+                    if u or a:
+                        history_lines.append(f"User: {u}\nAI: {a}")
+                elif "role" in parsed_dict and "content" in parsed_dict:
+                    role = str(parsed_dict.get("role", "")).lower()
+                    content = parsed_dict.get("content", "")
+                    if role == "user":
+                        history_lines.append(f"User: {content}")
+                    elif role in ["assistant", "ai"]:
+                        history_lines.append(f"AI: {content}")
+            else:
+                c_str = str(c).strip()
+                if c_str.lower().startswith("user:"):
+                    history_lines.append(c_str)
+                elif c_str.lower().startswith("ai:") or c_str.lower().startswith("ai :"):
+                    suffix = c_str.split(":", 1)[1].strip()
+                    history_lines.append(f"AI: {suffix}")
+                elif c_str.lower().startswith("assistant:"):
+                    suffix = c_str.split(":", 1)[1].strip()
+                    history_lines.append(f"AI: {suffix}")
+                else:
+                    history_lines.append(c_str)
         history_text = "\n".join(history_lines)
 
         # Yield initial intent parsing step
@@ -723,8 +1001,143 @@ class AgentOrchestrator:
         # Yield routed step
         yield json.dumps({"type": "step", "message": f"Query routed to category: '{category}'"})
 
-        # DB Agent
-        if category == "db":
+        # 0. Agentic Multi-Step Planner
+        if category == "agentic":
+            steps = intent.get("steps", [])
+            yield json.dumps({"type": "step", "message": f"Planner decided on {len(steps)} steps: {intent.get('plan','')}"})
+            
+            # Resolve user's city if storeId is provided
+            user_city = "Chicago"
+            store_id = current_user.get("storeId") if current_user else None
+            if store_id:
+                try:
+                    conn = sqlite3.connect(DB_PATH)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT city FROM stores WHERE id = ?", (store_id,))
+                    row = cursor.fetchone()
+                    if row:
+                        user_city = row[0]
+                    conn.close()
+                except Exception as e:
+                    logger.warning(f"[PLANNER AGENT] Failed to fetch city for store in stream: {e}")
+
+            db_results_list = []
+            external_results_list = []
+            rag_results_list = []
+            live_results_list = []
+            
+            for idx, step in enumerate(steps, 1):
+                step_agent = step.get("agent")
+                tool = step.get("tool", "")
+                param = step.get("param", "") or step.get("query", "")
+                
+                # Normalize tool checks: redirect weather/pricing/events/trends to external
+                if tool in ["weather", "pricing", "events", "trends", "search"]:
+                    step_agent = "external"
+                elif step_agent == "live" and any(w in str(param).lower() or w in str(tool).lower() for w in ["weather", "temp"]):
+                    step_agent = "external"
+                    tool = "weather"
+
+                # Yield progress updates to user
+                msg = f"[Step {idx}/{len(steps)}] Executing {step_agent}"
+                if tool:
+                    msg += f" ({tool})"
+                yield json.dumps({"type": "step", "message": msg})
+                
+                if step_agent == "db":
+                    sql = step.get("query")
+                    if sql:
+                        sql = self._clean_sql_query(sql)
+                        headers, rows, status = self.execute_db_query(sql)
+                        if status == "success":
+                            db_results_list.append({
+                                "sql": sql,
+                                "headers": headers,
+                                "rows": [list(r) for r in rows]
+                            })
+                            tools_used.append("SQLite Database")
+                
+                elif step_agent == "external":
+                    param, overridden = self._restrict_to_north_america(param, user_city)
+                    if tool == "weather":
+                        if not param or len(str(param).split()) > 2 or any(w in str(param).lower() for w in ["local", "current", "today", "forecast", "get"]):
+                            param = user_city
+                        from app.external_services.weather_service import get_weather
+                        try:
+                            res = await get_weather(param)
+                            external_results_list.append(f"Weather forecast for {param} (North America): {res}")
+                            tools_used.append("Weather API")
+                        except Exception as e:
+                            logger.error(f"Weather API stream failed: {e}")
+                    elif tool == "pricing":
+                        if not param or len(str(param).split()) > 4:
+                            param = "Convenience retail items pricing"
+                        search_param = f"{param} in USA convenience stores"
+                        from app.external_services.competitor_pricing import get_competitor_pricing
+                        try:
+                            res = await get_competitor_pricing(search_param)
+                            external_results_list.append(f"Competitor pricing for {param} (North America): {res}")
+                            tools_used.append("Apify Pricing Scraper")
+                        except Exception as e:
+                            logger.error(f"Pricing API stream failed: {e}")
+                    elif tool == "events":
+                        if not param or len(str(param).split()) > 2:
+                            param = user_city
+                        from app.external_services.event_tracker import get_local_events
+                        try:
+                            res = await get_local_events(param)
+                            external_results_list.append(f"Events near {param} (North America): {res}")
+                            tools_used.append("PredictHQ Events")
+                        except Exception as e:
+                            logger.error(f"Events API stream failed: {e}")
+                    elif tool == "trends":
+                        if not param or len(str(param).split()) > 2:
+                            param = "inflation"
+                        from app.external_services.market_trends import get_market_trend
+                        try:
+                            res = await get_market_trend(param)
+                            external_results_list.append(f"Economic trends for {param} (North America): {res}")
+                            tools_used.append("FRED Economic Trends")
+                        except Exception as e:
+                            logger.error(f"Trends API stream failed: {e}")
+                    else:
+                        search_param = f"{param} retail market North America"
+                        from app.external_services.web_search import search_web
+                        try:
+                            res = await search_web(search_param)
+                            external_results_list.append(f"Web search for {param} (North America): {res}")
+                            tools_used.append("Tavily Search")
+                        except Exception as e:
+                            logger.error(f"Search API stream failed: {e}")
+                
+                elif step_agent == "rag":
+                    rag_docs = self.rag.search(step.get("query", query), top_k=2)
+                    for r in rag_docs:
+                        rag_results_list.append({
+                            "title": r["doc"]["title"],
+                            "content": r["doc"]["content"]
+                        })
+                    tools_used.append("SOP Guidelines (RAG)")
+                
+                elif step_agent == "live":
+                    live_results_list.append(self.get_live_sensor_readings())
+                    tools_used.append("IoT Sensors Link")
+            
+            # Combine all results
+            if db_results_list:
+                db_results = {
+                    "headers": db_results_list[0]["headers"],
+                    "rows": db_results_list[0]["rows"]
+                }
+            if external_results_list:
+                external_results = "\n\n".join(external_results_list)
+            if rag_results_list:
+                rag_results = rag_results_list
+            if live_results_list:
+                live_results = live_results_list[0]
+
+        # 1. DB Agent
+        elif category == "db":
             yield json.dumps({"type": "step", "message": "Formulating database query..."})
             role = current_user.get("role") if current_user else None
             store_id = current_user.get("storeId") if current_user else None
@@ -912,7 +1325,7 @@ class AgentOrchestrator:
             visualization = self._auto_visualize(query, db_results)
         elif rag_results:
             report_markdown = full_text
-        elif category == "external" and external_results:
+        elif (category == "external" or category == "agentic") and external_results:
             report_markdown = f"# External Query Source Details\n\nQuery: {query}\n\n{external_results}"
 
         yield json.dumps({
