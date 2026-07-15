@@ -632,7 +632,7 @@ async def query_dataset(db_path: str, query: str, conversation: list = [], conte
 
         # Step 4: Let LLM format the response
         format_prompt = f"""
-        You are an AI data analyst for AI Sheets. Provide a concise, structured answer in RAW MARKDOWN ONLY based on the SQL results and the user's query.
+         You are the **BP Store Manager AI Copilot**. Provide a concise, structured answer in RAW MARKDOWN ONLY based on the SQL results and the user's query.
 
         Requirements:
         - Use bold labels and bullets. For single specific records (like a specific invoice or transaction), provide a comprehensive breakdown including seller/company info, customer info, items, and taxes.
@@ -1139,3 +1139,98 @@ async def generate_visualization(db_path: str, query: str, conversation: list = 
             "image": None,
             "explanation": friendly_msg
         }), total_usage
+
+async def query_salesforce_customer(query: str, conversation: list = [], context_summary: str = "") -> Tuple[str, Dict[str, int]]:
+    """
+    Queries Salesforce for customer details based on the user's natural language request.
+    It fetches fields metadata dynamically to construct a correct SOQL query via LLM.
+    """
+    from app.external_services.salesforce import get_object_fields, query_salesforce
+    
+    total_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    try:
+        object_name = os.getenv("SF_CUSTOMER_OBJECT_NAME", "Customer_Details__c")
+        
+        # 1. Fetch Salesforce object fields dynamically
+        fields = get_object_fields(object_name)
+        if not fields:
+            return f"Error: Could not retrieve metadata description for Salesforce object '{object_name}'. Please verify that the object exists in Salesforce and credentials are correct.", total_usage
+            
+        fields_summary = "\n".join([f"- {f['name']} ({f['type']}): {f['label']}" for f in fields])
+        
+        # Prepare conversation context
+        chat_history = ""
+        if context_summary:
+            chat_history += f"[Previous Conversation Summary]: {context_summary}\n\n"
+        if conversation:
+            chat_history += "".join([f"User: {item['user']}\nAssistant: {item['ai']}\n" for item in conversation])
+            
+        # 2. Ask LLM to generate SOQL
+        soql_prompt = f"""
+        You are a Salesforce SOQL query expert.
+        Generate a valid Salesforce SOQL query for the custom object '{object_name}' to answer the user's query.
+        
+        CRITICAL RULES:
+        - Use ONLY SELECT statements.
+        - Do NOT use 'SELECT *'. List only the API field names to retrieve.
+        - Use ONLY fields that exist in the schema below:
+        {fields_summary}
+        - Do NOT invent field names.
+        - String literals in the WHERE clause must be enclosed in single quotes.
+        - Do NOT include markdown styling or headers. Return ONLY the raw SOQL string.
+        - If matching names, use the LIKE operator with wildcards if appropriate (e.g. Name LIKE '%John%').
+        
+        User Query: {query}
+        Chat History: {chat_history}
+        
+        Return ONLY the SOQL query.
+        """
+        
+        soql_response_obj = await llm.ainvoke(soql_prompt)
+        _accumulate_usage(total_usage, _extract_token_usage(soql_response_obj))
+        soql_query = soql_response_obj.content.strip().strip("`").strip()
+        
+        if soql_query.lower().startswith("soql"):
+            soql_query = soql_query[4:].strip()
+            
+        logger.info(f"[SALESFORCE_TOOL] Generated SOQL: {soql_query}")
+        
+        # 3. Query Salesforce
+        records = query_salesforce(soql_query)
+        
+        # Remove attributes key for formatting
+        for r in records:
+            r.pop("attributes", None)
+            
+        records_summary = json.dumps(records, indent=2) if records else "No matching customer records found."
+        
+        # Print the Salesforce results directly to the terminal for tracking
+        print(f"\n[TRACKING] === SALESFORCE TOOL RESULT ===")
+        print(f"SOQL Query: {soql_query}")
+        print(f"Records Returned count: {len(records)}")
+        print(f"Records sample (first 3): {json.dumps(records[:3], indent=2)}")
+        print(f"==========================================\n")
+        
+        # 4. Format findings via LLM
+        format_prompt = f"""
+        You are a Client Management Specialist. Format the following retrieved Salesforce customer records into a professional, human-readable markdown response.
+        
+        Requirements:
+        - Use tables or clear bullet points.
+        - Detail contact info, status, and related identifiers.
+        - If no records are found, state that clearly and suggest details to look for.
+        - Do NOT output any code or queries.
+        
+        User Query: {query}
+        Salesforce SOQL Executed: {soql_query}
+        Retrieved Records:
+        {records_summary}
+        """
+        
+        format_response = await llm.ainvoke(format_prompt)
+        _accumulate_usage(total_usage, _extract_token_usage(format_response))
+        return format_response.content, total_usage
+        
+    except Exception as e:
+        logger.error(f"[SALESFORCE_TOOL] Tool error: {str(e)}")
+        return f"I encountered an error while searching Salesforce: {str(e)}. Please check your Salesforce configurations.", total_usage

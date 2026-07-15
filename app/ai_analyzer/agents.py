@@ -84,6 +84,7 @@ async def parse_query_to_tool(llm, query: str, conversation: list, db_path: str,
         "query_dataset",
         "generate_detailed_report",
         "generate_visualization",
+        "query_salesforce_customer",
         "conversational"
     ]
 
@@ -106,6 +107,7 @@ async def parse_query_to_tool(llm, query: str, conversation: list, db_path: str,
     query_dataset
     generate_detailed_report
     generate_visualization
+    query_salesforce_customer
 
     2) The single word: conversational
     (use this for greetings, chit-chat, and user prompts that are unrelated to dataset analysis)
@@ -122,8 +124,18 @@ async def parse_query_to_tool(llm, query: str, conversation: list, db_path: str,
     - Off-topic chit-chat (small talk, meta-discussion)
     - No dataset reference
     - **EXCEPTION**: If user asks "generate a python program" or "write code" to analyze data, DO NOT return conversational. Route to the appropriate data tool (e.g., query_dataset or generate_insights).
+    - **EXCEPTION**: If user asks about customers, client details, or searching in Salesforce, DO NOT return conversational. Route to query_salesforce_customer.
     → Return: conversational
     
+    STEP 1.5: IS IT A SALESFORCE CUSTOMER DETAIL QUERY?
+    - Asks to search, retrieve, find or view customer/client details in Salesforce.
+    - Mentions Salesforce, client details, client database, or custom customer object.
+    - Examples:
+      * "Search for customer John in Salesforce" → query_salesforce_customer
+      * "Get details of client Kavin from Salesforce" → query_salesforce_customer
+      * "List all Salesforce customer details" → query_salesforce_customer
+    → Return: query_salesforce_customer
+
     STEP 2: SPECIFIC FACTUAL QUESTIONS → query_dataset (NOT anomalies)
     - Starts with: "Do we have...", "Are there...", "Is there...", "Can you find..."
     - Asks: "Who/Which/What/Where specific people/records"

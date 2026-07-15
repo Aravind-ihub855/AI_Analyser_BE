@@ -164,7 +164,7 @@ class AgentOrchestrator:
         - "db": Questions needing database stats, inventory, POs, vendors, sales, product analysis, store profile highlights, or KPI metrics summaries (e.g., total products count, inventory valuation, stockout counts, reorder status, or overdue purchase orders).
         - "rag": Questions about operating guidelines, SOPs, safety response plans, compliance, HR, cash reconciliations. Do NOT route store profile/performance highlights here.
         - "live": Questions about active IoT sensor readings (temperature check, leakage check).
-        - "external": Questions that need competitor pricing, local/public events near the store, national market trends (inflation, oil prices, FRED), current weather for cities/regions, or any general web search queries.
+        - "external": Questions that need competitor pricing, local/public events near the store, national market trends (inflation, oil prices, FRED), current weather for cities/regions, general web search queries, or client/customer lookup in the Salesforce CRM.
         - "workflow": Action requests (e.g. reordering items, updates, creating escalation tickets).
         - "conversational": Greetings, small talk, general questions unrelated to store operations.
         - "agentic": Complex queries that require checking multiple distinct sources of information (e.g. checking weather + inventory stock levels, comparing competitor prices + checking local catalog, events + sales trends).
@@ -182,6 +182,11 @@ class AgentOrchestrator:
            - A Market Trends step ("external" with tool "search" or "trends") to fetch general consumer trends or economic stats.
         4. PLURAL/SINGULAR ROBUSTNESS IN SQL: When generating SQL query steps in the steps block (under "query"), always handle both singular and plural forms for text search (e.g. use `(name LIKE '%chicken noodle%' OR name LIKE '%chicken noodles%')` or `(name LIKE '%jacket%' OR name LIKE '%jackets%')`) so matches succeed even if there is a singular/plural variation in the product name.
         5. STORE PROFILE & METRICS: Any questions asking for a store profile, store highlights, store performance overview, or dashboard KPI stats (e.g., "tell me the details about our store", "how is our store doing", "summarize store metrics") MUST be routed to the "db" category. This is because they require querying the database to aggregate live counts (such as total unique SKUs, total stock valuation, high-risk items, reorder limit counts, and overdue PO counts).
+        6. SALESFORCE & CLIENT DETAILS: Any queries asking to search, lookup, retrieve, or list customer details or client contacts in Salesforce (e.g. "search John in Salesforce", "Who are the clients in our Salesforce customer database?", "Get details of client Kavin from Salesforce") MUST be routed to the "external" category. Do NOT route them to "rag" or "conversational".
+        7. PROACTIVE REFILL & STOCKING RECOMMENDATIONS: Any query asking what products need to be refilled, restocked, or ordered (e.g., "which product is need to refill", "what should I refill today", "recommend products to stock up") requires a comprehensive multi-agent plan. You MUST route these queries to the "agentic" category and construct a steps block that plans:
+           - A SQLite Database step ("db" with query "SELECT name, category, current_stock, rol, roq FROM inventory WHERE current_stock <= rol") to check low stock items.
+           - An External step ("external" with tool "weather") for the local store city to assess weather-related demands.
+           - An External step ("external" with tool "events") to check local events that might drive convenience store traffic.
 
         Available Database Schema context for deciding "db" queries:
         {DB_SCHEMA_REFERENCE}
@@ -233,6 +238,15 @@ class AgentOrchestrator:
             rows = cursor.fetchall()
             conn.close()
             logger.info(f"[DB AGENT] Query returned {len(rows)} row(s) with headers: {headers}")
+            
+            # Print the tool results directly to the terminal for tracking
+            print(f"\n[TRACKING] === DB AGENT SQL TOOL RESULT ===")
+            print(f"SQL: {cleaned_sql}")
+            print(f"Returned {len(rows)} rows.")
+            print(f"Headers: {headers}")
+            print(f"Rows (first 5): {rows[:5]}")
+            print(f"=======================================\n")
+            
             return headers, rows, "success"
         except Exception as e:
             logger.error(f"[DB AGENT] SQL execution error: {e}")
@@ -428,8 +442,60 @@ class AgentOrchestrator:
             }
         }
 
+    def get_inventory_summary(self, store_id: str) -> dict:
+        """Fetches a high-level summary of store inventory (low-stock items and category metrics)."""
+        if not store_id:
+            store_id = 'BP-CHI-1024'
+        try:
+            import sqlite3
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            # 1. Low stock items (where current_stock is less than or equal to reorder level ROL)
+            cursor.execute("""
+                SELECT name, category, current_stock, rol, roq, risk_level 
+                FROM inventory 
+                WHERE store_id = ? AND current_stock <= rol
+            """, (store_id,))
+            low_stock = [
+                {
+                    "name": r[0],
+                    "category": r[1],
+                    "current_stock": r[2],
+                    "rol": r[3],
+                    "roq": r[4],
+                    "risk_level": r[5]
+                }
+                for r in cursor.fetchall()
+            ]
+            
+            # 2. General category stocks
+            cursor.execute("""
+                SELECT category, COUNT(*), SUM(current_stock) 
+                FROM inventory 
+                WHERE store_id = ? 
+                GROUP BY category
+            """, (store_id,))
+            categories = [
+                {
+                    "category": r[0],
+                    "sku_count": r[1],
+                    "total_stock": r[2]
+                }
+                for r in cursor.fetchall()
+            ]
+            conn.close()
+            return {"low_stock": low_stock[:15], "categories": categories}
+        except Exception as e:
+            logger.warning(f"[ORCHESTRATOR] Failed to fetch inventory summary: {e}")
+            return {"low_stock": [], "categories": []}
+
     async def process(self, query: str, conversation: list, current_user: dict = None) -> dict:
         """Main orchestrator entrypoint."""
+        store_id = current_user.get("storeId") if current_user else None
+        if not store_id:
+            store_id = "BP-CHI-1024"
+        inventory_summary = self.get_inventory_summary(store_id)
+
         # Convert history format
         history_lines = []
         for c in conversation:
@@ -645,13 +711,28 @@ class AgentOrchestrator:
                 for r in rag_docs
             ]
             tools_used.append("SOP Guidelines (RAG)")
-            logger.info(f"[RAG AGENT] Retrieved {len(rag_results)} document(s).")
+            logger.info(f"[RAG AGENT] Complete. Retrieved {len(rag_results)} document(s).")
+            
+            # Print the tool results directly to the terminal for tracking
+            print(f"\n[TRACKING] === RAG AGENT TOOL RESULT ===")
+            print(f"RAG Query: {query}")
+            print(f"Documents found: {len(rag_results)}")
+            for idx, doc in enumerate(rag_results, 1):
+                print(f"  [{idx}] Title: {doc['title']} (Score: {doc['score']:.4f})")
+                print(f"      Content Preview: {doc['content'][:150]}...")
+            print(f"========================================\n")
 
         # 3. Live IoT Agent
         elif category == "live":
             logger.info("[LIVE AGENT] Fetching real-time IoT sensor readings.")
             live_results = self.get_live_sensor_readings()
             logger.info(f"[LIVE AGENT] Retrieved {len(live_results.get('sensors', []))} sensor reading(s).")
+            
+            # Print the tool results directly to the terminal for tracking
+            print(f"\n[TRACKING] === LIVE IoT AGENT TOOL RESULT ===")
+            print(f"IoT Sensors: {live_results.get('sensors')}")
+            print(f"Local Weather: {live_results.get('weather')}")
+            print(f"=============================================\n")
 
         # 4. External Web Services Agent
         elif category == "external":
@@ -680,10 +761,11 @@ class AgentOrchestrator:
             - "pricing": Competitor pricing, convenience product/gas competitor price check.
             - "events": Concerts, festivals, sports, local events.
             - "trends": National economic market trends (inflation, CPI, FRED, unemployment).
+            - "salesforce": Use this when the query requires searching, listing, retrieving, or looking up customer/client details or CRM records from the Salesforce system (e.g. searching client lists, customer contacts).
 
             Provide output in JSON format:
             {{
-                "tool": "search" | "weather" | "pricing" | "events" | "trends",
+                "tool": "search" | "weather" | "pricing" | "events" | "trends" | "salesforce",
                 "param": "The key parameter (e.g. search query, city name, product name, or economic metric type like 'inflation')"
             }}
 
@@ -713,24 +795,48 @@ class AgentOrchestrator:
                 if tool == "search":
                     from app.external_services.web_search import search_web
                     external_results = await search_web(param)
+                    tools_used.append("Tavily Search")
                 elif tool == "weather":
                     from app.external_services.weather_service import get_weather
                     external_results = await get_weather(param)
+                    tools_used.append("Weather API")
                 elif tool == "pricing":
                     from app.external_services.competitor_pricing import get_competitor_pricing
                     external_results = await get_competitor_pricing(param)
+                    tools_used.append("Apify Pricing Scraper")
                 elif tool == "events":
                     from app.external_services.event_tracker import get_local_events
                     external_results = await get_local_events(param)
+                    tools_used.append("PredictHQ Events")
                 elif tool == "trends":
                     from app.external_services.market_trends import get_market_trend
                     external_results = await get_market_trend(param)
+                    tools_used.append("FRED Economic Trends")
+                elif tool == "salesforce":
+                    from app.ai_analyzer.tools import query_salesforce_customer
+                    res_content, usage = await query_salesforce_customer(param, conversation=conversation)
+                    external_results = res_content
+                    tools_used.append("Salesforce CRM")
                 else:
                     external_results = "Unknown tool requested."
+                
+                # Print the tool results directly to the terminal for tracking
+                print(f"\n[TRACKING] === EXTERNAL TOOL RESULT ({tool}) ===")
+                print(f"Parameter: {param}")
+                print(f"Result Preview: {str(external_results)[:300]}...")
+                print(f"================================================\n")
+                
             except Exception as e:
                 logger.warning(f"[EXTERNAL AGENT] Classification failed: {e}. Defaulting to Tavily search.")
                 from app.external_services.web_search import search_web
                 external_results = await search_web(query)
+                tools_used.append("Tavily Search")
+                
+                # Print the tool results directly to the terminal for tracking
+                print(f"\n[TRACKING] === EXTERNAL TOOL RESULT (search-fallback) ===")
+                print(f"Query: {query}")
+                print(f"Result Preview: {str(external_results)[:300]}...")
+                print(f"=========================================================\n")
 
         # 5. Workflow Agent
         elif category == "workflow":
@@ -740,11 +846,18 @@ class AgentOrchestrator:
             else:
                 workflow_executed = "Escalation ticket generated: 'Vendor Delivery Issue VND-001' logged in operations log under ID 'TKT-82190'."
             logger.info(f"[WORKFLOW AGENT] Result: {workflow_executed}")
+            tools_used.append("Workflow Automation")
+            
+            # Print the tool results directly to the terminal for tracking
+            print(f"\n[TRACKING] === WORKFLOW AGENT TOOL RESULT ===")
+            print(f"Workflow Action Executed: {workflow_executed}")
+            print(f"=============================================\n")
 
         # Synthesis Agent
         logger.info(f"[SYNTHESIS AGENT] Composing final response using model: {self.active_model}")
         synthesis_prompt = f"""
-        You are the BP Store Manager AI Copilot.
+        You are the **BP Store Manager AI Copilot** — a conversational, multi-level Agentic AI System primarily focused on supporting BP store managers, operations advisors, and vendor managers.
+        You are capable of: Answer, Analyze, Compare, Predict, Recommend, Execute, Monitor, and Notify.
         Respond to the user's store operations query based on the fetched context and execution details.
         
         User Query: "{query}"
@@ -756,6 +869,7 @@ class AgentOrchestrator:
         - Live IoT Sensors: {json.dumps(live_results) if live_results else "None"}
         - Workflow Executed: {workflow_executed if workflow_executed else "None"}
         - External Web Context: {external_results if external_results else "None"}
+        - Live Store Inventory Summary (Low Stock & Category Health): {json.dumps(inventory_summary) if inventory_summary else "None"}
         
         Response Guidelines:
         - Speak like an expert Store Manager Copilot. Maintain utmost professionalism and keep answers concise.
@@ -769,6 +883,12 @@ class AgentOrchestrator:
           * Even if data is shown in the right panel, present the key summaries in the chat as structured bullet points or short tables.
         - If sensor temp warnings exceed standard limits, flag it as a Warning.
         - CRITICAL: Do NOT include, show, or reference the internal SQL query. Never show SQL code. Present only insights in business language.
+        
+        - PROACTIVE RECOMMENDATIONS & ANALYTICAL REASONS:
+          * Weather queries: Analyze the weather temperature and conditions from "External Web Context". If hot (>22°C/72°F) or clear, suggest promoting cold beverages, water, and ice cream. If cold (<10°C/50°F) or rainy/snowy, suggest promoting hot coffee, hot food/sandwiches, or automotive anti-freeze/wash fluid. ALWAYS cross-reference this recommendation with the "Live Store Inventory Summary" (e.g. if beverages are low in stock, warn the manager to refill them immediately to capture the weather-driven demand).
+          * Event queries: Inspect upcoming event details and attendance figures from "External Web Context". If there is a high-attendance event (e.g. concert, game), calculate the demand surge on convenience grab-and-go products (energy drinks, snacks, bakery/sandwiches). Cross-reference with the "Live Store Inventory Summary" to recommend restocking specific items if current stock levels are below ROL or insufficient.
+          * Refill / Stocking / General queries: For any query about refilling, stocking up, or general recommendations, analyze the "Live Store Inventory Summary"'s low-stock list (current_stock <= rol). Combining this low-stock data with the current weather conditions AND any upcoming events, provide a prioritized refill recommendation. Highlight standard refills (low stock) and proactive/seasonal refills (high demand due to hot weather/local concert).
+          * Low-Stock Tables: When presenting the table/list of low-stock items (such as Coolant, Castrol Edge, Bread, etc.), include a **"Contextual Suggestion / Action Tip"** column (or add bullet notes underneath). For each item, provide a context-based reason showing *why* it needs urgent attention (e.g. "Restock Orange Coolant immediately; high risk of engine overheating in current 27°C heat", or "Replenish Wonder Bread as it is an essential daily staple for event day sandwich demand").
         """
         
         res = await self.llm.ainvoke(synthesis_prompt)
@@ -941,6 +1061,11 @@ class AgentOrchestrator:
 
     async def process_stream(self, query: str, conversation: list, current_user: dict = None):
         """Asynchronous generator yielding SSE chunks for progress steps, tokens, and final result."""
+        store_id = current_user.get("storeId") if current_user else None
+        if not store_id:
+            store_id = "BP-CHI-1024"
+        inventory_summary = self.get_inventory_summary(store_id)
+
         # 1. Parse history
         history_lines = []
         for c in conversation:
@@ -1166,12 +1291,27 @@ class AgentOrchestrator:
                 for r in rag_docs
             ]
             tools_used.append("SOP Guidelines (RAG)")
+            
+            # Print the tool results directly to the terminal for tracking
+            print(f"\n[TRACKING] === RAG AGENT TOOL RESULT (STREAM) ===")
+            print(f"RAG Query: {query}")
+            print(f"Documents found: {len(rag_results)}")
+            for idx, doc in enumerate(rag_results, 1):
+                print(f"  [{idx}] Title: {doc['title']} (Score: {doc['score']:.4f})")
+                print(f"      Content Preview: {doc['content'][:150]}...")
+            print(f"=================================================\n")
 
         # Live IoT Agent
         elif category == "live":
             yield json.dumps({"type": "step", "message": "Reading real-time IoT sensors..."})
             live_results = self.get_live_sensor_readings()
             tools_used.append("IoT Sensors Link")
+            
+            # Print the tool results directly to the terminal for tracking
+            print(f"\n[TRACKING] === LIVE IoT AGENT TOOL RESULT (STREAM) ===")
+            print(f"IoT Sensors: {live_results.get('sensors')}")
+            print(f"Local Weather: {live_results.get('weather')}")
+            print(f"======================================================\n")
 
         # External Agent
         elif category == "external":
@@ -1197,10 +1337,11 @@ class AgentOrchestrator:
             - "pricing": Competitor pricing, convenience product/gas competitor price check.
             - "events": Concerts, festivals, sports, local events.
             - "trends": National economic market trends (inflation, CPI, FRED, unemployment).
+            - "salesforce": Use this when the query requires searching, listing, retrieving, or looking up customer/client details or CRM records from the Salesforce system (e.g. searching client lists, customer contacts).
 
             Provide output in JSON format:
             {{
-                "tool": "search" | "weather" | "pricing" | "events" | "trends",
+                "tool": "search" | "weather" | "pricing" | "events" | "trends" | "salesforce",
                 "param": "The key parameter (e.g. search query, city name, product name, or economic metric type like 'inflation')"
             }}
 
@@ -1250,11 +1391,30 @@ class AgentOrchestrator:
                     from app.external_services.market_trends import get_market_trend
                     external_results = await get_market_trend(param)
                     tools_used.append("FRED Economic Trends")
+                elif tool == "salesforce":
+                    yield json.dumps({"type": "step", "message": f"Querying Salesforce customer database for: '{param}'..."})
+                    from app.ai_analyzer.tools import query_salesforce_customer
+                    res_content, usage = await query_salesforce_customer(param, conversation=conversation)
+                    external_results = res_content
+                    tools_used.append("Salesforce CRM")
+                
+                # Print the tool results directly to the terminal for tracking
+                print(f"\n[TRACKING] === EXTERNAL TOOL RESULT (STREAM - {tool}) ===")
+                print(f"Parameter: {param}")
+                print(f"Result Preview: {str(external_results)[:300]}...")
+                print(f"=========================================================\n")
+                
             except Exception:
                 yield json.dumps({"type": "step", "message": "Searching web..."})
                 from app.external_services.web_search import search_web
                 external_results = await search_web(query)
                 tools_used.append("Tavily Search")
+                
+                # Print the tool results directly to the terminal for tracking
+                print(f"\n[TRACKING] === EXTERNAL TOOL RESULT (STREAM - search-fallback) ===")
+                print(f"Query: {query}")
+                print(f"Result Preview: {str(external_results)[:300]}...")
+                print(f"==================================================================\n")
 
         # Workflow Agent
         elif category == "workflow":
@@ -1264,6 +1424,11 @@ class AgentOrchestrator:
             else:
                 workflow_executed = "Escalation ticket generated: 'Vendor Delivery Issue VND-001' logged in operations log under ID 'TKT-82190'."
             tools_used.append("Workflow Automation")
+            
+            # Print the tool results directly to the terminal for tracking
+            print(f"\n[TRACKING] === WORKFLOW AGENT TOOL RESULT (STREAM) ===")
+            print(f"Workflow Action Executed: {workflow_executed}")
+            print(f"=====================================================\n")
 
         # Final Synthesis
         yield json.dumps({"type": "step", "message": "Synthesizing response..."})
@@ -1281,7 +1446,8 @@ class AgentOrchestrator:
                 table_data = [db_results["headers"]] + db_results["rows"]
 
         synthesis_prompt = f"""
-        You are the BP Store Manager AI Copilot.
+        You are the **BP Store Manager AI Copilot** — a conversational, multi-level Agentic AI System primarily focused on supporting BP store managers, operations advisors, and vendor managers.
+        You are capable of: Answer, Analyze, Compare, Predict, Recommend, Execute, Monitor, and Notify.
         Respond to the user's store operations query based on the fetched context, history context, and execution details.
         
         User Query: "{query}"
@@ -1296,6 +1462,7 @@ class AgentOrchestrator:
         - Live IoT Sensors: {json.dumps(live_results) if live_results else "None"}
         - Workflow Executed: {workflow_executed if workflow_executed else "None"}
         - External Web Context: {external_results if external_results else "None"}
+        - Live Store Inventory Summary (Low Stock & Category Health): {json.dumps(inventory_summary) if inventory_summary else "None"}
         
         Response Guidelines:
         - Speak like an expert Store Manager Copilot. Maintain utmost professionalism and keep answers concise.
@@ -1310,6 +1477,12 @@ class AgentOrchestrator:
         - Value parameters: table_in_panel = {table_in_panel}
         - If sensor temp warnings exceed standard limits, flag it as a Warning.
         - CRITICAL: Do NOT include, show, or reference the internal SQL query. Never show SQL code. Present only insights in business language.
+        
+        - PROACTIVE RECOMMENDATIONS & ANALYTICAL REASONS:
+          * Weather queries: Analyze the weather temperature and conditions from "External Web Context". If hot (>22°C/72°F) or clear, suggest promoting cold beverages, water, and ice cream. If cold (<10°C/50°F) or rainy/snowy, suggest promoting hot coffee, hot food/sandwiches, or automotive anti-freeze/wash fluid. ALWAYS cross-reference this recommendation with the "Live Store Inventory Summary" (e.g. if beverages are low in stock, warn the manager to refill them immediately to capture the weather-driven demand).
+          * Event queries: Inspect upcoming event details and attendance figures from "External Web Context". If there is a high-attendance event (e.g. concert, game), calculate the demand surge on convenience grab-and-go products (energy drinks, snacks, bakery/sandwiches). Cross-reference with the "Live Store Inventory Summary" to recommend restocking specific items if current stock levels are below ROL or insufficient.
+          * Refill / Stocking / General queries: For any query about refilling, stocking up, or general recommendations, analyze the "Live Store Inventory Summary"'s low-stock list (current_stock <= rol). Combining this low-stock data with the current weather conditions AND any upcoming events, provide a prioritized refill recommendation. Highlight standard refills (low stock) and proactive/seasonal refills (high demand due to hot weather/local concert).
+          * Low-Stock Tables: When presenting the table/list of low-stock items (such as Coolant, Castrol Edge, Bread, etc.), include a **"Contextual Suggestion / Action Tip"** column (or add bullet notes underneath). For each item, provide a context-based reason showing *why* it needs urgent attention (e.g. "Restock Orange Coolant immediately; high risk of engine overheating in current 27°C heat", or "Replenish Wonder Bread as it is an essential daily staple for event day sandwich demand").
         """
 
         full_text = ""

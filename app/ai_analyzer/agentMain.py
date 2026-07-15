@@ -1,6 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
 from .agents import parse_query_to_tool
-from .tools import get_data_summary, detect_anomalies, generate_insights, query_dataset, generate_detailed_report, generate_visualization, init_db_from_dataframe
+from .tools import get_data_summary, detect_anomalies, generate_insights, query_dataset, generate_detailed_report, generate_visualization, init_db_from_dataframe, query_salesforce_customer
 from .date_converter import convert_excel_dates_in_dataframe
 from .db_sync import sync_mongodb_to_sqlite
 import shutil
@@ -100,7 +100,7 @@ async def generate_acknowledgement_message(tool_name: str, llm) -> Tuple[str, Di
     No predefined wording — AI creates a short, human-like confirmation (1-2 sentences).
     """
     prompt = f"""
-    You are AI Sheet, an intelligent and friendly data assistant.
+    You are the BP Store Manager AI Copilot, an intelligent and friendly store operations assistant.
 
     The user has just received the output for a tool operation: "{tool_name}".
 
@@ -167,19 +167,19 @@ async def process_query(query: str, conversation: List[str], current_user: dict 
                 msg = json.loads(conv_str)
                 parsed_history.append({"user": msg.get("user"), "ai": msg.get("ai")})
             
-            # Robust History Management: Keep only the last 20 messages
-            if len(parsed_history) > 20:
-                parsed_history = parsed_history[-20:]
+            # Robust History Management: Keep at least 40 messages to retain 15-20 turns of memory context
+            if len(parsed_history) > 40:
+                parsed_history = parsed_history[-40:]
             
             current_conversation_history = parsed_history
             conversation_history = parsed_history # Sync global (though global is not ideal for multi-user)
             
         except json.JSONDecodeError:
             logger.warning(f"Invalid conversation string received from frontend.")
-            current_conversation_history = conversation_history[-20:] if len(conversation_history) > 20 else conversation_history
+            current_conversation_history = conversation_history[-40:] if len(conversation_history) > 40 else conversation_history
     else:
         # Fallback to global history if not provided
-        current_conversation_history = conversation_history[-20:] if len(conversation_history) > 20 else conversation_history
+        current_conversation_history = conversation_history[-40:] if len(conversation_history) > 40 else conversation_history
 
     # Parse query to determine the tool or conversational response
     total_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
@@ -237,22 +237,22 @@ async def process_query(query: str, conversation: List[str], current_user: dict 
         # Generate a general conversational response using LLM (not SQL)
         history_text = "".join([f"User: {item['user']}\nAssistant: {item['ai']}\n" for item in current_conversation_history])
         prompt = f"""
-        You are **AI Sheet** — an intelligent, friendly, and context-aware AI Data Analyst assistant.
+        You are **BP Store Manager AI Copilot** — a conversational, multi-level AI Agentic Copilot primarily focused on supporting BP store managers, operations advisors, and vendor managers.
 
         ### Your Role & Identity:
-        - You are the built-in AI companion of the AI Sheet platform — a system that lets users upload, clean, analyze, visualize, and query datasets in natural language.
-        - You help users understand data, generate insights, detect anomalies, and build reports — but you also handle general conversations with warmth and clarity.
-        - You communicate like a knowledgeable data analyst who is approachable, supportive, and never overly formal.
+        - You are the BP Store Manager AI Copilot, capable of understanding operational questions, analyzing live inventory, accessing enterprise knowledge, executing workflows, monitoring events, and providing recommendations in real time.
+        - You are an Agentic AI System, not a normal chatbot. This means you do not only answer questions, but you can also: Answer, Analyze, Compare, Predict, Recommend, Execute, Monitor, and Notify.
+        - You communicate in a professional, warm, and operations-aware tone.
 
         ### Your Capabilities:
-        - You can summarize datasets, write SQL queries, create charts, generate detailed reports, and detect anomalies when needed.
-        - You can also engage in friendly chats, explain features of AI Sheet, or guide users on how to use data tools.
-        - **CRITICAL**: Do NOT output Python code. Provide financial results instead.
+        - You assist with database stats, inventory checks, RAG guidelines, local events, FRED market trends, competitor pricing, weather tracking, and Salesforce customer database queries.
+        - You can also engage in friendly chats, explain features of the Copilot, or guide users on how to use operational tools.
+        - **CRITICAL**: Do NOT output Python code. Provide operational/financial results instead.
         - You do **not** execute or reference SQL in general or casual chats.
 
         ### Your Behaviour Rules:
         1. If the user greets you, compliments you, or talks casually — respond naturally in a friendly, concise tone.
-        2. If the query mentions AI Sheet's abilities, explain them briefly and helpfully.
+        2. If the query mentions your abilities, explain them briefly and helpfully.
         3. Never mention technical back-end details like SQL or databases unless explicitly asked.
         4. Keep responses short (1–3 sentences), polite, and contextually relevant.
         5. Sound human and conversational — not robotic or salesy.
@@ -300,7 +300,8 @@ async def process_query(query: str, conversation: List[str], current_user: dict 
         "generate_insights": lambda q, c: generate_insights(db_path, q, c),
         "query_dataset": lambda q, c: query_dataset(db_path, q, c),
         "generate_detailed_report": lambda q, c: generate_detailed_report(db_path, q, c),
-        "generate_visualization": lambda q, c: generate_visualization(db_path, q, c)
+        "generate_visualization": lambda q, c: generate_visualization(db_path, q, c),
+        "query_salesforce_customer": lambda q, c: query_salesforce_customer(q, c)
     }
 
     if tool_response not in tool_map:
@@ -463,7 +464,7 @@ async def create_or_update_db_from_data(data: str, filename: str, current_user: 
         return {"message": f"Error processing data: {str(e)}"}
 
 @router.post("/query")
-async def aisheets_query(
+async def copilot_query(
     query: str = Form(...),
     conversation: List[str] = Form(default_factory=list),
     current_user: dict = Depends(get_current_user)
