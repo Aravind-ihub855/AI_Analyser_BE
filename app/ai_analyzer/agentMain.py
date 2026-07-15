@@ -13,7 +13,7 @@ import sqlite3
 import logging
 from dotenv import load_dotenv
 
-from app.services.llm import get_groq_llm
+from app.services.llm import get_openrouter_llm,get_groq_llm
 from app.shared.authMiddleware import get_current_user
 from app.services.user_usage import (
     increment_user_used_tokens,
@@ -22,7 +22,7 @@ from app.services.user_usage import (
 from .agent_orchestrator import AgentOrchestrator
 
 load_dotenv()
-llm = get_groq_llm()
+llm = get_openrouter_llm()
 orchestrator = AgentOrchestrator()
 
 router = APIRouter()

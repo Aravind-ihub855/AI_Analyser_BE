@@ -202,7 +202,7 @@ class AgentOrchestrator:
              //   "agent": "db" | "rag" | "live" | "external" | "workflow"
              //   "query": "Strictly valid SQL query for 'db' agent (e.g. SELECT * FROM inventory WHERE (name LIKE '%chicken noodle%' OR name LIKE '%chicken noodles%')), or search query for RAG/workflow"
              //   "tool": "Optional. Specific tool for 'external' agent: 'weather' | 'pricing' | 'events' | 'trends' | 'search'"
-             //   "param": "Optional. Parameter for external tool (e.g. city name like 'Chicago', product name like 'Monster Energy', or metric like 'inflation')"
+             //   "param": "Optional. Parameter for external tool. For 'weather' and 'events', this MUST be strictly the city name (e.g., 'Chicago'). Do NOT include timeframe or temporal modifiers like 'today', 'tomorrow', 'next 2 days', or 'next week' inside 'param'."
           ]
         }}
 
@@ -225,6 +225,84 @@ class AgentOrchestrator:
         except Exception as e:
             logger.warning(f"[INTENT AGENT] Error parsing intent: {e}. Defaulting to 'db'.")
             return {"category": "db", "plan": "Default query resolution path.", "is_complex": False}
+
+    async def run_business_context_engine(self, query: str, category: str) -> dict:
+        """Determines the business decisions, impact, and causal logic for a query."""
+        logger.info(f"[BUSINESS CONTEXT ENGINE] Evaluating query: '{query}' under category: '{category}'")
+        prompt = f"""
+        You are the Business Context Engine of the BP Store Manager AI Copilot.
+        Your role is to apply professional store management and retail operations knowledge to evaluate a user's query BEFORE we generate the final recommendation.
+        
+        Analyze the query and output a JSON object with these exact fields:
+        1. "influenced_decisions": List of specific store business decisions this query influences (e.g., ["Beverage demand", "Ice demand", "Staffing", "Inventory risk", "Pricing audit", "None"]).
+        2. "causally_related": Boolean indicating if weather, event, or replenishment recommendations are causally related to this specific question.
+           - Set to true ONLY if the user is asking about weather, upcoming events, vendor delays, product stockouts, refilling, ordering, or general planning.
+           - Set to false if the user is asking about transactional database counts, metrics (e.g. "how many purchase transactions", "show sales volume"), customer CRM info (e.g. "find John Smith"), general policies, or greetings.
+        3. "business_impact_template": A brief description of how this metric/topic impacts daily convenience retail operations.
+        4. "action_guidelines": Actionable advice for the store manager based on the topic.
+        
+        Examples:
+        - Query: "How's today's weather?"
+          Output: {{
+            "influenced_decisions": ["Beverage demand", "Ice demand", "Automotive fluids", "Seasonal products"],
+            "causally_related": true,
+            "business_impact_template": "Weather dictates immediate traffic patterns and category shifts (e.g., hot weather boosts beverage/water sales).",
+            "action_guidelines": "Adjust stock presentation and verify cold-beverage levels."
+          }}
+          
+        - Query: "How many purchase transactions?"
+          Output: {{
+            "influenced_decisions": ["Sales volume audit", "Customer traffic analysis"],
+            "causally_related": false,
+            "business_impact_template": "Transactional counts measure throughput and terminal utilization.",
+            "action_guidelines": "Audit peak hours to optimize cashier scheduling."
+          }}
+          
+        Current User Query: "{query}"
+        Query Category: "{category}"
+        
+        Return ONLY the raw JSON block.
+        """
+        try:
+            res = await self.llm.ainvoke(prompt)
+            content = res.content.strip()
+            if content.startswith("```json"):
+                content = content.split("```json")[1].split("```")[0].strip()
+            elif content.startswith("```"):
+                content = content.split("```")[1].split("```")[0].strip()
+            parsed = json.loads(content)
+            logger.info(f"[BUSINESS CONTEXT ENGINE] Analysis: decisions={parsed.get('influenced_decisions')}, causally_related={parsed.get('causally_related')}")
+            return parsed
+        except Exception as e:
+            logger.warning(f"[BUSINESS CONTEXT ENGINE] Error parsing business context: {e}. Defaulting.")
+            return {
+                "influenced_decisions": ["General Operations"],
+                "causally_related": False,
+                "business_impact_template": "Core metrics indicate store throughput and operations status.",
+                "action_guidelines": "Monitor key performance indicators."
+            }
+
+    def _extract_days_from_query(self, query: str, default: int = 7) -> int:
+        """Parses a query string to extract a timeframe in days."""
+        q = (query or "").lower()
+        import re
+        # Check patterns like "next 3 days", "2 days", "5 days", "10 days"
+        match = re.search(r'(\d+)\s*day', q)
+        if match:
+            try:
+                return int(match.group(1))
+            except ValueError:
+                pass
+        # Check patterns like "1 week", "2 weeks", "next week"
+        if "1 week" in q or "next week" in q:
+            return 7
+        if "2 weeks" in q:
+            return 14
+        if "today" in q and "tomorrow" not in q and "week" not in q and "day" not in q:
+            return 1
+        if "tomorrow" in q and "week" not in q and "day" not in q:
+            return 2
+        return default
 
     def execute_db_query(self, sql: str) -> Tuple[list, list, str]:
         """Runs the SQL query on SQLite and returns headers, rows, and status message."""
@@ -541,6 +619,7 @@ class AgentOrchestrator:
 
         intent = await self.parse_intent(query, history_text)
         category = intent.get("category", "conversational")
+        business_context = await self.run_business_context_engine(query, category)
         
         db_results = None
         rag_results = None
@@ -600,7 +679,7 @@ class AgentOrchestrator:
                                 "headers": headers,
                                 "rows": [list(r) for r in rows]
                             })
-                            tools_used.append("SQLite Database")
+                            tools_used.append("Internal Database")
                 
                 elif step_agent == "external":
                     param, overridden = self._restrict_to_north_america(param, user_city)
@@ -611,7 +690,7 @@ class AgentOrchestrator:
                         try:
                             res = await get_weather(param)
                             external_results_list.append(f"Weather forecast for {param} (North America): {res}")
-                            tools_used.append("Weather API")
+                            tools_used.append("Weather Tool")
                         except Exception as e:
                             logger.error(f"Weather API step failed: {e}")
                     elif tool == "pricing":
@@ -622,7 +701,7 @@ class AgentOrchestrator:
                         try:
                             res = await get_competitor_pricing(search_param)
                             external_results_list.append(f"Competitor pricing for {param} (North America): {res}")
-                            tools_used.append("Apify Pricing Scraper")
+                            tools_used.append("Competitor Pricing Tool")
                         except Exception as e:
                             logger.error(f"Pricing API step failed: {e}")
                     elif tool == "events":
@@ -630,9 +709,10 @@ class AgentOrchestrator:
                             param = user_city
                         from app.external_services.event_tracker import get_local_events
                         try:
-                            res = await get_local_events(param)
+                            days_param = self._extract_days_from_query(query)
+                            res = await get_local_events(param, days=days_param)
                             external_results_list.append(f"Events near {param} (North America): {res}")
-                            tools_used.append("PredictHQ Events")
+                            tools_used.append("Events Tool")
                         except Exception as e:
                             logger.error(f"Events API step failed: {e}")
                     elif tool == "trends":
@@ -643,7 +723,7 @@ class AgentOrchestrator:
                         try:
                             res = await get_market_trend(param)
                             external_results_list.append(f"Economic trends for {param} (North America): {res}")
-                            tools_used.append("FRED Economic Trends")
+                            tools_used.append("Economic Trends Tool")
                         except Exception as e:
                             logger.error(f"Trends API step failed: {e}")
                     else:
@@ -652,7 +732,7 @@ class AgentOrchestrator:
                         try:
                             res = await search_web(search_param)
                             external_results_list.append(f"Web search for {param} (North America): {res}")
-                            tools_used.append("Tavily Search")
+                            tools_used.append("Web Search Tool")
                         except Exception as e:
                             logger.error(f"Search API step failed: {e}")
                 
@@ -663,11 +743,11 @@ class AgentOrchestrator:
                             "title": r["doc"]["title"],
                             "content": r["doc"]["content"]
                         })
-                    tools_used.append("SOP Guidelines (RAG)")
+                    tools_used.append("SOP Guidelines")
                 
                 elif step_agent == "live":
                     live_results_list.append(self.get_live_sensor_readings())
-                    tools_used.append("IoT Sensors Link")
+                    tools_used.append("IoT Sensors")
             
             # Combine all results
             if db_results_list:
@@ -696,12 +776,12 @@ class AgentOrchestrator:
                     "headers": headers,
                     "rows": [list(row) for row in rows]
                 }
-                tools_used.append("SQLite Database")
+                tools_used.append("Internal Database")
                 logger.info(f"[DB AGENT] Complete. Returned {len(rows)} row(s).")
             else:
                 db_results = {"error": status}
                 logger.error(f"[DB AGENT] Query failed: {status}")
-
+ 
         # 2. RAG Agent
         elif category == "rag":
             logger.info("[RAG AGENT] Starting semantic policy/SOP search.")
@@ -710,7 +790,7 @@ class AgentOrchestrator:
                 {"title": r["doc"]["title"], "category": r["doc"]["category"], "content": r["doc"]["content"], "score": r["score"]}
                 for r in rag_docs
             ]
-            tools_used.append("SOP Guidelines (RAG)")
+            tools_used.append("SOP Guidelines")
             logger.info(f"[RAG AGENT] Complete. Retrieved {len(rag_results)} document(s).")
             
             # Print the tool results directly to the terminal for tracking
@@ -721,12 +801,13 @@ class AgentOrchestrator:
                 print(f"  [{idx}] Title: {doc['title']} (Score: {doc['score']:.4f})")
                 print(f"      Content Preview: {doc['content'][:150]}...")
             print(f"========================================\n")
-
+ 
         # 3. Live IoT Agent
         elif category == "live":
             logger.info("[LIVE AGENT] Fetching real-time IoT sensor readings.")
             live_results = self.get_live_sensor_readings()
             logger.info(f"[LIVE AGENT] Retrieved {len(live_results.get('sensors', []))} sensor reading(s).")
+            tools_used.append("IoT Sensors")
             
             # Print the tool results directly to the terminal for tracking
             print(f"\n[TRACKING] === LIVE IoT AGENT TOOL RESULT ===")
@@ -766,8 +847,13 @@ class AgentOrchestrator:
             Provide output in JSON format:
             {{
                 "tool": "search" | "weather" | "pricing" | "events" | "trends" | "salesforce",
-                "param": "The key parameter (e.g. search query, city name, product name, or economic metric type like 'inflation')"
+                "param": "The key parameter (e.g. search query, city name, product name, or economic metric type like 'inflation')."
             }}
+
+            CRITICAL PARAMETER CLEANING RULE:
+            - For "weather" and "events" tools, the "param" MUST be strictly the city name or location name (e.g., "Chicago", "Denver").
+            - Do NOT include temporal modifiers or relative timeframes (such as "today", "tomorrow", "next 2 days", "next week", "for 1 week") in the "param" string. Return ONLY the location name itself.
+            - Example: "events in Chicago for next 2 days" -> tool: "events", param: "Chicago".
 
             Context Context Guidelines:
             - User's Assigned Store ID: {store_id if store_id else 'None'}
@@ -795,28 +881,29 @@ class AgentOrchestrator:
                 if tool == "search":
                     from app.external_services.web_search import search_web
                     external_results = await search_web(param)
-                    tools_used.append("Tavily Search")
+                    tools_used.append("Web Search Tool")
                 elif tool == "weather":
                     from app.external_services.weather_service import get_weather
                     external_results = await get_weather(param)
-                    tools_used.append("Weather API")
+                    tools_used.append("Weather Tool")
                 elif tool == "pricing":
                     from app.external_services.competitor_pricing import get_competitor_pricing
                     external_results = await get_competitor_pricing(param)
-                    tools_used.append("Apify Pricing Scraper")
+                    tools_used.append("Competitor Pricing Tool")
                 elif tool == "events":
                     from app.external_services.event_tracker import get_local_events
-                    external_results = await get_local_events(param)
-                    tools_used.append("PredictHQ Events")
+                    days_param = self._extract_days_from_query(query)
+                    external_results = await get_local_events(param, days=days_param)
+                    tools_used.append("Events Tool")
                 elif tool == "trends":
                     from app.external_services.market_trends import get_market_trend
                     external_results = await get_market_trend(param)
-                    tools_used.append("FRED Economic Trends")
+                    tools_used.append("Economic Trends Tool")
                 elif tool == "salesforce":
                     from app.ai_analyzer.tools import query_salesforce_customer
                     res_content, usage = await query_salesforce_customer(param, conversation=conversation)
                     external_results = res_content
-                    tools_used.append("Salesforce CRM")
+                    tools_used.append("Customer CRM Tool")
                 else:
                     external_results = "Unknown tool requested."
                 
@@ -830,7 +917,7 @@ class AgentOrchestrator:
                 logger.warning(f"[EXTERNAL AGENT] Classification failed: {e}. Defaulting to Tavily search.")
                 from app.external_services.web_search import search_web
                 external_results = await search_web(query)
-                tools_used.append("Tavily Search")
+                tools_used.append("Web Search Tool")
                 
                 # Print the tool results directly to the terminal for tracking
                 print(f"\n[TRACKING] === EXTERNAL TOOL RESULT (search-fallback) ===")
@@ -846,7 +933,7 @@ class AgentOrchestrator:
             else:
                 workflow_executed = "Escalation ticket generated: 'Vendor Delivery Issue VND-001' logged in operations log under ID 'TKT-82190'."
             logger.info(f"[WORKFLOW AGENT] Result: {workflow_executed}")
-            tools_used.append("Workflow Automation")
+            tools_used.append("Workflow Tool")
             
             # Print the tool results directly to the terminal for tracking
             print(f"\n[TRACKING] === WORKFLOW AGENT TOOL RESULT ===")
@@ -858,7 +945,7 @@ class AgentOrchestrator:
         synthesis_prompt = f"""
         You are the **BP Store Manager AI Copilot** — a conversational, multi-level Agentic AI System primarily focused on supporting BP store managers, operations advisors, and vendor managers.
         You are capable of: Answer, Analyze, Compare, Predict, Recommend, Execute, Monitor, and Notify.
-        Respond to the user's store operations query based on the fetched context and execution details.
+        Respond to the user's store operations query based on the fetched context, execution details, and business context analysis.
         
         User Query: "{query}"
         Category Routed: {category}
@@ -871,26 +958,62 @@ class AgentOrchestrator:
         - External Web Context: {external_results if external_results else "None"}
         - Live Store Inventory Summary (Low Stock & Category Health): {json.dumps(inventory_summary) if inventory_summary else "None"}
         
-        Response Guidelines:
-        - Speak like an expert Store Manager Copilot. Maintain utmost professionalism and keep answers concise.
-        - CRITICAL: Avoid long, dense paragraph blocks. Never write more than 2 consecutive sentences of paragraph text.
-        - CRITICAL: Present lists, parameters, comparisons, or details using clean **Markdown Tables**, **bullet points**, or **bold structured lists** so it is easy to read at a glance.
-        - CRITICAL CONFLICT RESOLUTION: If both DB Execution Results and RAG Retrieval or Conversation History are present, you MUST prioritize the numbers, counts, quantities, and statistics in the 'DB Execution Results'. Do NOT copy or use any counts, values, or statistics mentioned in RAG guidelines, SOPs, or conversation history (e.g. if the current DB results show Fast: 29, you MUST output 29, even if history or SOP documents mention different counts like 19). Double-check that your written numbers match the current execution values exactly, not the history.
-        - CRITICAL: You must extract and copy the numbers and stats from the DB Execution Results exactly. Do NOT guess, alter, or count them incorrectly (e.g., FSN counts, stock levels, or prices must match the DB results 1:1). If the DB results show 19 items, you MUST output 19.
-        - IMPORTANT: Output your final response in clean Markdown. Do NOT wrap the entire response in code fences.
-        - TABLE RULE:
-          * If a table is needed and not loaded in the right panel, you MUST render it as a standard **Markdown Table** inside this text response.
-          * Even if data is shown in the right panel, present the key summaries in the chat as structured bullet points or short tables.
-        - If sensor temp warnings exceed standard limits, flag it as a Warning.
-        - CRITICAL: Do NOT include, show, or reference the internal SQL query. Never show SQL code. Present only insights in business language.
+        Business Context Engine Analysis:
+        {json.dumps(business_context)}
+
+        ════════════════════════════════════════════════════════════
+        MANDATORY RESPONSE FORMAT — YOU MUST FOLLOW THIS STRUCTURE EXACTLY
+        ════════════════════════════════════════════════════════════
+
+        Always structure your response using these FOUR parts in this exact order:
+
+        **Requested Information / Summary**
+        Provide the direct, precise answer to the user's query. 
+        - If the retrieved details contain structured data (such as weather metrics, local event lists, database records, or configuration statistics), you MUST format this data as a clean Markdown table in this section to make it highly legible at a glance.
+        - For Weather / Event Queries: Lead with a short 2–3 sentence overview explaining the conditions and general impact on product demand (e.g. increase in cold beverages, ice, or snacks, and foot traffic expectations), followed immediately by the Markdown table showing the specific metrics or upcoming event records.
+        - For other queries: Lead with a direct summary of key facts and figures, using a Markdown table where multiple items or rows of data are returned.
+
+        **Business Impact**
+        Provide a clean, comprehensive list of bullet points detailing the business implications. Dynamically analyze how the weather conditions, event parameters, or database results affect multiple store categories (such as beverages, snacks, grocery, automotive, staffing, or promotions).
+        For each bullet point, write a bold category/operational label, followed by a colon and a short, logical explanation (10–18 words max) explaining *how* and *why* this area is impacted based on the current context.
+
+        **Recommended Actions**
+        Provide clear, prioritized next steps dynamically tailored to the query subject. Group them into logical subheadings:
         
-        - PROACTIVE RECOMMENDATIONS & ANALYTICAL REASONS:
-          * Weather queries: Analyze the weather temperature and conditions from "External Web Context". If hot (>22°C/72°F) or clear, suggest promoting cold beverages, water, and ice cream. If cold (<10°C/50°F) or rainy/snowy, suggest promoting hot coffee, hot food/sandwiches, or automotive anti-freeze/wash fluid. ALWAYS cross-reference this recommendation with the "Live Store Inventory Summary" (e.g. if beverages are low in stock, warn the manager to refill them immediately to capture the weather-driven demand).
-          * Event queries: Inspect upcoming event details and attendance figures from "External Web Context". If there is a high-attendance event (e.g. concert, game), calculate the demand surge on convenience grab-and-go products (energy drinks, snacks, bakery/sandwiches). Cross-reference with the "Live Store Inventory Summary" to recommend restocking specific items if current stock levels are below ROL or insufficient.
-          * Refill / Stocking / General queries: For any query about refilling, stocking up, or general recommendations, analyze the "Live Store Inventory Summary"'s low-stock list (current_stock <= rol). Combining this low-stock data with the current weather conditions AND any upcoming events, provide a prioritized refill recommendation. Highlight standard refills (low stock) and proactive/seasonal refills (high demand due to hot weather/local concert).
-          * Low-Stock Tables: When presenting the table/list of low-stock items (such as Coolant, Castrol Edge, Bread, etc.), include a **"Contextual Suggestion / Action Tip"** column (or add bullet notes underneath). For each item, provide a context-based reason showing *why* it needs urgent attention (e.g. "Restock Orange Coolant immediately; high risk of engine overheating in current 27°C heat", or "Replenish Wonder Bread as it is an essential daily staple for event day sandwich demand").
+        1. **Restocking Priorities**:
+           - Prioritize restocking low-inventory items or high-demand categories relevant to the query.
+           - If low-stock items are present in the context, list them using a structured Markdown Table:
+             | Product | Category | Current Stock | ROL | Contextual Suggestion |
+             Each "Contextual Suggestion" entry must show intelligence by dynamically connecting the product's low stock to the query context (e.g., explaining why it is urgent due to the current temperature, weather conditions, or local event).
+             
+        2. **Displays & Positioning** (ONLY include if directly relevant to the query context, e.g., weather demand changes or local event promotions; otherwise, omit this subheading and section entirely):
+           - Suggest logical display, positioning, or promotional adjustments matching the query context.
+           
+        3. **Staffing** (ONLY include if directly relevant to the query context, e.g., event/weather foot traffic surges; otherwise, omit this subheading and section entirely):
+           - Suggest logical staffing, checkout, or scheduling adjustments matching the query context.
+
+        *[Close with a single italicised call-to-action question dynamically tailored to the user's specific query and response content.]*
+
+        ════════════════════════════════════════════════════════════
+        ADDITIONAL RULES (apply on top of the format above)
+        ════════════════════════════════════════════════════════════
+        - CONFLICT RESOLUTION: Always use exact numbers from 'DB Execution Results'. Never alter or guess figures.
+        - Do NOT show SQL code or reference internal system details.
+        - Do NOT reference "right panel", "Analytics Panel", or any external dashboard.
+        - Do NOT wrap the response in code fences.
+        - SECTION HEADERS: Use bold markdown (`**Section Name**`) — never use `###` headings for section titles.
+        - CONCISENESS: Never write more than 2 consecutive sentences of plain paragraph text. Ensure all bullet points and table cell entries are short, direct, and punchy (max 15-20 words).
+        - CAUSAL RULE: If "causally_related" is FALSE in the Business Context Engine block, keep Recommended Actions
+          strictly focused on the query topic. Do NOT append weather/event/low-stock refill recommendations.
+        - If "causally_related" is TRUE, cross-reference inventory summary, weather context, and events to provide
+          specific, prioritized recommendations with contextual reasoning per product.
+        - WEATHER QUERIES (causally_related=true): If hot (>22°C) or clear, recommend cold beverages, water, ice.
+          If cold (<10°C) or rainy/snowy, recommend hot drinks, food, or automotive antifreeze. Cross-check inventory.
+        - EVENT QUERIES (causally_related=true): Inspect event attendance from External Web Context. High-attendance
+          events drive grab-and-go demand (energy drinks, snacks, sandwiches). Cross-check inventory for restocking.
+        - LOW-STOCK TABLES: Always include a "Contextual Suggestion" column per product with a real urgency reason.
+        - SENSOR WARNINGS: If IoT sensor readings exceed safe limits, flag them with a Warning label.
         """
-        
         res = await self.llm.ainvoke(synthesis_prompt)
         final_answer = res.content.strip()
         
@@ -1115,6 +1238,9 @@ class AgentOrchestrator:
         intent = await self.parse_intent(query, history_text)
         category = intent.get("category", "conversational")
         
+        yield json.dumps({"type": "step", "message": "Enriching business context..."})
+        business_context = await self.run_business_context_engine(query, category)
+        
         db_results = None
         rag_results = None
         live_results = None
@@ -1180,7 +1306,7 @@ class AgentOrchestrator:
                                 "headers": headers,
                                 "rows": [list(r) for r in rows]
                             })
-                            tools_used.append("SQLite Database")
+                            tools_used.append("Internal Database")
                 
                 elif step_agent == "external":
                     param, overridden = self._restrict_to_north_america(param, user_city)
@@ -1191,7 +1317,7 @@ class AgentOrchestrator:
                         try:
                             res = await get_weather(param)
                             external_results_list.append(f"Weather forecast for {param} (North America): {res}")
-                            tools_used.append("Weather API")
+                            tools_used.append("Weather Tool")
                         except Exception as e:
                             logger.error(f"Weather API stream failed: {e}")
                     elif tool == "pricing":
@@ -1202,7 +1328,7 @@ class AgentOrchestrator:
                         try:
                             res = await get_competitor_pricing(search_param)
                             external_results_list.append(f"Competitor pricing for {param} (North America): {res}")
-                            tools_used.append("Apify Pricing Scraper")
+                            tools_used.append("Competitor Pricing Tool")
                         except Exception as e:
                             logger.error(f"Pricing API stream failed: {e}")
                     elif tool == "events":
@@ -1210,9 +1336,10 @@ class AgentOrchestrator:
                             param = user_city
                         from app.external_services.event_tracker import get_local_events
                         try:
-                            res = await get_local_events(param)
+                            days_param = self._extract_days_from_query(query)
+                            res = await get_local_events(param, days=days_param)
                             external_results_list.append(f"Events near {param} (North America): {res}")
-                            tools_used.append("PredictHQ Events")
+                            tools_used.append("Events Tool")
                         except Exception as e:
                             logger.error(f"Events API stream failed: {e}")
                     elif tool == "trends":
@@ -1222,7 +1349,7 @@ class AgentOrchestrator:
                         try:
                             res = await get_market_trend(param)
                             external_results_list.append(f"Economic trends for {param} (North America): {res}")
-                            tools_used.append("FRED Economic Trends")
+                            tools_used.append("Economic Trends Tool")
                         except Exception as e:
                             logger.error(f"Trends API stream failed: {e}")
                     else:
@@ -1231,7 +1358,7 @@ class AgentOrchestrator:
                         try:
                             res = await search_web(search_param)
                             external_results_list.append(f"Web search for {param} (North America): {res}")
-                            tools_used.append("Tavily Search")
+                            tools_used.append("Web Search Tool")
                         except Exception as e:
                             logger.error(f"Search API stream failed: {e}")
                 
@@ -1242,11 +1369,11 @@ class AgentOrchestrator:
                             "title": r["doc"]["title"],
                             "content": r["doc"]["content"]
                         })
-                    tools_used.append("SOP Guidelines (RAG)")
+                    tools_used.append("SOP Guidelines")
                 
                 elif step_agent == "live":
                     live_results_list.append(self.get_live_sensor_readings())
-                    tools_used.append("IoT Sensors Link")
+                    tools_used.append("IoT Sensors")
             
             # Combine all results
             if db_results_list:
@@ -1278,10 +1405,10 @@ class AgentOrchestrator:
                     "headers": headers,
                     "rows": [list(row) for row in rows]
                 }
-                tools_used.append("SQLite Database")
+                tools_used.append("Internal Database")
             else:
                 db_results = {"error": status}
-
+ 
         # RAG Agent
         elif category == "rag":
             yield json.dumps({"type": "step", "message": "Searching policy SOP knowledge base..."})
@@ -1290,7 +1417,7 @@ class AgentOrchestrator:
                 {"title": r["doc"]["title"], "category": r["doc"]["category"], "content": r["doc"]["content"], "score": r["score"]}
                 for r in rag_docs
             ]
-            tools_used.append("SOP Guidelines (RAG)")
+            tools_used.append("SOP Guidelines")
             
             # Print the tool results directly to the terminal for tracking
             print(f"\n[TRACKING] === RAG AGENT TOOL RESULT (STREAM) ===")
@@ -1300,12 +1427,12 @@ class AgentOrchestrator:
                 print(f"  [{idx}] Title: {doc['title']} (Score: {doc['score']:.4f})")
                 print(f"      Content Preview: {doc['content'][:150]}...")
             print(f"=================================================\n")
-
+ 
         # Live IoT Agent
         elif category == "live":
             yield json.dumps({"type": "step", "message": "Reading real-time IoT sensors..."})
             live_results = self.get_live_sensor_readings()
-            tools_used.append("IoT Sensors Link")
+            tools_used.append("IoT Sensors")
             
             # Print the tool results directly to the terminal for tracking
             print(f"\n[TRACKING] === LIVE IoT AGENT TOOL RESULT (STREAM) ===")
@@ -1342,8 +1469,13 @@ class AgentOrchestrator:
             Provide output in JSON format:
             {{
                 "tool": "search" | "weather" | "pricing" | "events" | "trends" | "salesforce",
-                "param": "The key parameter (e.g. search query, city name, product name, or economic metric type like 'inflation')"
+                "param": "The key parameter (e.g. search query, city name, product name, or economic metric type like 'inflation')."
             }}
+
+            CRITICAL PARAMETER CLEANING RULE:
+            - For "weather" and "events" tools, the "param" MUST be strictly the city name or location name (e.g., "Chicago", "Denver").
+            - Do NOT include temporal modifiers or relative timeframes (such as "today", "tomorrow", "next 2 days", "next week", "for 1 week") in the "param" string. Return ONLY the location name itself.
+            - Example: "events in Chicago for next 2 days" -> tool: "events", param: "Chicago".
 
             Context Context Guidelines:
             - User's Assigned Store ID: {store_id if store_id else 'None'}
@@ -1370,33 +1502,34 @@ class AgentOrchestrator:
                     yield json.dumps({"type": "step", "message": f"Searching web for: '{param}'..."})
                     from app.external_services.web_search import search_web
                     external_results = await search_web(param)
-                    tools_used.append("Tavily Search")
+                    tools_used.append("Web Search Tool")
                 elif tool == "weather":
                     yield json.dumps({"type": "step", "message": f"Fetching weather forecast for: '{param}'..."})
                     from app.external_services.weather_service import get_weather
                     external_results = await get_weather(param)
-                    tools_used.append("Weather API")
+                    tools_used.append("Weather Tool")
                 elif tool == "pricing":
                     yield json.dumps({"type": "step", "message": f"Querying competitor pricing for: '{param}'..."})
                     from app.external_services.competitor_pricing import get_competitor_pricing
                     external_results = await get_competitor_pricing(param)
-                    tools_used.append("Apify Pricing Scraper")
+                    tools_used.append("Competitor Pricing Tool")
                 elif tool == "events":
                     yield json.dumps({"type": "step", "message": f"Checking local events near: '{param}'..."})
                     from app.external_services.event_tracker import get_local_events
-                    external_results = await get_local_events(param)
-                    tools_used.append("PredictHQ Events")
+                    days_param = self._extract_days_from_query(query)
+                    external_results = await get_local_events(param, days=days_param)
+                    tools_used.append("Events Tool")
                 elif tool == "trends":
                     yield json.dumps({"type": "step", "message": f"Querying FRED market index for: '{param}'..."})
                     from app.external_services.market_trends import get_market_trend
                     external_results = await get_market_trend(param)
-                    tools_used.append("FRED Economic Trends")
+                    tools_used.append("Economic Trends Tool")
                 elif tool == "salesforce":
                     yield json.dumps({"type": "step", "message": f"Querying Salesforce customer database for: '{param}'..."})
                     from app.ai_analyzer.tools import query_salesforce_customer
                     res_content, usage = await query_salesforce_customer(param, conversation=conversation)
                     external_results = res_content
-                    tools_used.append("Salesforce CRM")
+                    tools_used.append("Customer CRM Tool")
                 
                 # Print the tool results directly to the terminal for tracking
                 print(f"\n[TRACKING] === EXTERNAL TOOL RESULT (STREAM - {tool}) ===")
@@ -1408,7 +1541,7 @@ class AgentOrchestrator:
                 yield json.dumps({"type": "step", "message": "Searching web..."})
                 from app.external_services.web_search import search_web
                 external_results = await search_web(query)
-                tools_used.append("Tavily Search")
+                tools_used.append("Web Search Tool")
                 
                 # Print the tool results directly to the terminal for tracking
                 print(f"\n[TRACKING] === EXTERNAL TOOL RESULT (STREAM - search-fallback) ===")
@@ -1423,7 +1556,7 @@ class AgentOrchestrator:
                 workflow_executed = "Draft Purchase Order created. Assigned ID 'PO-99120'. Items matched to reorder quantities (ROQ). Final manager signature required in ERP/SAP."
             else:
                 workflow_executed = "Escalation ticket generated: 'Vendor Delivery Issue VND-001' logged in operations log under ID 'TKT-82190'."
-            tools_used.append("Workflow Automation")
+            tools_used.append("Workflow Tool")
             
             # Print the tool results directly to the terminal for tracking
             print(f"\n[TRACKING] === WORKFLOW AGENT TOOL RESULT (STREAM) ===")
@@ -1448,7 +1581,7 @@ class AgentOrchestrator:
         synthesis_prompt = f"""
         You are the **BP Store Manager AI Copilot** — a conversational, multi-level Agentic AI System primarily focused on supporting BP store managers, operations advisors, and vendor managers.
         You are capable of: Answer, Analyze, Compare, Predict, Recommend, Execute, Monitor, and Notify.
-        Respond to the user's store operations query based on the fetched context, history context, and execution details.
+        Respond to the user's store operations query based on the fetched context, history context, execution details, and business context analysis.
         
         User Query: "{query}"
         Category Routed: {category}
@@ -1464,25 +1597,61 @@ class AgentOrchestrator:
         - External Web Context: {external_results if external_results else "None"}
         - Live Store Inventory Summary (Low Stock & Category Health): {json.dumps(inventory_summary) if inventory_summary else "None"}
         
-        Response Guidelines:
-        - Speak like an expert Store Manager Copilot. Maintain utmost professionalism and keep answers concise.
-        - CRITICAL: Avoid long, dense paragraph blocks. Never write more than 2 consecutive sentences of paragraph text.
-        - CRITICAL: Present lists, parameters, comparisons, or details using clean **Markdown Tables**, **bullet points**, or **bold structured lists** so it is easy to read at a glance.
-        - CRITICAL CONFLICT RESOLUTION: If both DB Execution Results and RAG Retrieval or Conversation History are present, you MUST prioritize the numbers, counts, quantities, and statistics in the 'DB Execution Results'. Do NOT copy or use any counts, values, or statistics mentioned in RAG guidelines, SOPs, or conversation history (e.g. if the current DB results show Fast: 29, you MUST output 29, even if history or SOP documents mention different counts like 19). Double-check that your written numbers match the current execution values exactly, not the history.
-        - CRITICAL: You must extract and copy the numbers and stats from the DB Execution Results exactly. Do NOT guess, alter, or count them incorrectly (e.g., FSN counts, stock levels, or prices must match the DB results 1:1). If the DB results show 19 items, you MUST output 19.
-        - IMPORTANT: Output your final response in clean Markdown. Do NOT wrap the entire response in code fences.
-        - TABLE RULE:
-          * If table_in_panel is FALSE, you MUST display the results clearly in a standard **Markdown Table** right here in your text response.
-          * If table_in_panel is TRUE, do NOT render any markdown table in your text response (it will be loaded in the Analytics panel). However, you should still present a concise summary of key highlights using bullet points or mini tables here.
-        - Value parameters: table_in_panel = {table_in_panel}
-        - If sensor temp warnings exceed standard limits, flag it as a Warning.
-        - CRITICAL: Do NOT include, show, or reference the internal SQL query. Never show SQL code. Present only insights in business language.
+        Business Context Engine Analysis:
+        {json.dumps(business_context)}
+
+        ════════════════════════════════════════════════════════════
+        MANDATORY RESPONSE FORMAT — YOU MUST FOLLOW THIS STRUCTURE EXACTLY
+        ════════════════════════════════════════════════════════════
+
+        Always structure your response using these FOUR parts in this exact order:
+
+        **Requested Information / Summary**
+        Provide the direct, precise answer to the user's query. 
+        - If the retrieved details contain structured data (such as weather metrics, local event lists, database records, or configuration statistics), you MUST format this data as a clean Markdown table in this section to make it highly legible at a glance.
+        - For Weather / Event Queries: Lead with a short 2–3 sentence overview explaining the conditions and general impact on product demand (e.g. increase in cold beverages, ice, or snacks, and foot traffic expectations), followed immediately by the Markdown table showing the specific metrics or upcoming event records.
+        - For other queries: Lead with a direct summary of key facts and figures, using a Markdown table where multiple items or rows of data are returned.
+
+        **Business Impact**
+        Provide a clean, comprehensive list of bullet points detailing the business implications. Dynamically analyze how the weather conditions, event parameters, or database results affect multiple store categories (such as beverages, snacks, grocery, automotive, staffing, or promotions).
+        For each bullet point, write a bold category/operational label, followed by a colon and a short, logical explanation (10–18 words max) explaining *how* and *why* this area is impacted based on the current context.
+
+        **Recommended Actions**
+        Provide clear, prioritized next steps dynamically tailored to the query subject. Group them into logical subheadings:
         
-        - PROACTIVE RECOMMENDATIONS & ANALYTICAL REASONS:
-          * Weather queries: Analyze the weather temperature and conditions from "External Web Context". If hot (>22°C/72°F) or clear, suggest promoting cold beverages, water, and ice cream. If cold (<10°C/50°F) or rainy/snowy, suggest promoting hot coffee, hot food/sandwiches, or automotive anti-freeze/wash fluid. ALWAYS cross-reference this recommendation with the "Live Store Inventory Summary" (e.g. if beverages are low in stock, warn the manager to refill them immediately to capture the weather-driven demand).
-          * Event queries: Inspect upcoming event details and attendance figures from "External Web Context". If there is a high-attendance event (e.g. concert, game), calculate the demand surge on convenience grab-and-go products (energy drinks, snacks, bakery/sandwiches). Cross-reference with the "Live Store Inventory Summary" to recommend restocking specific items if current stock levels are below ROL or insufficient.
-          * Refill / Stocking / General queries: For any query about refilling, stocking up, or general recommendations, analyze the "Live Store Inventory Summary"'s low-stock list (current_stock <= rol). Combining this low-stock data with the current weather conditions AND any upcoming events, provide a prioritized refill recommendation. Highlight standard refills (low stock) and proactive/seasonal refills (high demand due to hot weather/local concert).
-          * Low-Stock Tables: When presenting the table/list of low-stock items (such as Coolant, Castrol Edge, Bread, etc.), include a **"Contextual Suggestion / Action Tip"** column (or add bullet notes underneath). For each item, provide a context-based reason showing *why* it needs urgent attention (e.g. "Restock Orange Coolant immediately; high risk of engine overheating in current 27°C heat", or "Replenish Wonder Bread as it is an essential daily staple for event day sandwich demand").
+        1. **Restocking Priorities**:
+           - Prioritize restocking low-inventory items or high-demand categories relevant to the query.
+           - If low-stock items are present in the context, list them using a structured Markdown Table:
+             | Product | Category | Current Stock | ROL | Contextual Suggestion |
+             Each "Contextual Suggestion" entry must show intelligence by dynamically connecting the product's low stock to the query context (e.g., explaining why it is urgent due to the current temperature, weather conditions, or local event).
+             
+        2. **Displays & Positioning** (ONLY include if directly relevant to the query context, e.g., weather demand changes or local event promotions; otherwise, omit this subheading and section entirely):
+           - Suggest logical display, positioning, or promotional adjustments matching the query context.
+           
+        3. **Staffing** (ONLY include if directly relevant to the query context, e.g., event/weather foot traffic surges; otherwise, omit this subheading and section entirely):
+           - Suggest logical staffing, checkout, or scheduling adjustments matching the query context.
+
+        *[Close with a single italicised call-to-action question dynamically tailored to the user's specific query and response content.]*
+
+        ════════════════════════════════════════════════════════════
+        ADDITIONAL RULES (apply on top of the format above)
+        ════════════════════════════════════════════════════════════
+        - CONFLICT RESOLUTION: Always use exact numbers from 'DB Execution Results'. Never alter or guess figures.
+        - Do NOT show SQL code or reference internal system details.
+        - Do NOT reference "right panel", "Analytics Panel", or any external dashboard.
+        - Do NOT wrap the response in code fences.
+        - SECTION HEADERS: Use bold markdown (`**Section Name**`) — never use `###` headings for section titles.
+        - CONCISENESS: Never write more than 2 consecutive sentences of plain paragraph text. Ensure all bullet points and table cell entries are short, direct, and punchy (max 15-20 words).
+        - CAUSAL RULE: If "causally_related" is FALSE in the Business Context Engine block, keep Recommended Actions
+          strictly focused on the query topic. Do NOT append weather/event/low-stock refill recommendations.
+        - If "causally_related" is TRUE, cross-reference inventory summary, weather context, and events to provide
+          specific, prioritized recommendations with contextual reasoning per product.
+        - WEATHER QUERIES (causally_related=true): If hot (>22°C) or clear, recommend cold beverages, water, ice.
+          If cold (<10°C) or rainy/snowy, recommend hot drinks, food, or automotive antifreeze. Cross-check inventory.
+        - EVENT QUERIES (causally_related=true): Inspect event attendance from External Web Context. High-attendance
+          events drive grab-and-go demand (energy drinks, snacks, sandwiches). Cross-check inventory for restocking.
+        - LOW-STOCK TABLES: Always include a "Contextual Suggestion" column per product with a real urgency reason.
+        - SENSOR WARNINGS: If IoT sensor readings exceed safe limits, flag them with a Warning label.
         """
 
         full_text = ""

@@ -1,9 +1,11 @@
 import os 
 import httpx
+import logging
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq   
 from langchain_mistralai import ChatMistralAI
+from langchain_openai import ChatOpenAI
 
 from pathlib import Path
 
@@ -141,3 +143,30 @@ async def call_openrouter_ai(prompt: str) -> str:
                 return f"Error: OpenRouter service returned status {response.status_code}. {response.text}"
         except Exception as e:
             return f"Error: Unable to connect to OpenRouter service. {str(e)}"
+
+# --- OPENROUTER LLM GETTER ---
+def get_openrouter_llm(api_key: str = None):
+    """Configure OpenRouter LLM (Claude Haiku 4.5 by default), falling back if key is missing."""
+    key_to_use = api_key if api_key else os.getenv("OPENROUTER_API_KEY")
+    if not key_to_use:
+        # Fallback so startup does not crash before user configures OpenRouter
+        gemini_key = os.getenv("GOOGLE_API_KEY")
+        if gemini_key:
+            logger = logging.getLogger(__name__)
+            logger.warning("[OPENROUTER] OPENROUTER_API_KEY not set in .env. Falling back to Gemini.")
+            return ChatGoogleGenerativeAI(
+                model="gemini-2.5-flash",
+                google_api_key=gemini_key,
+                temperature=0.7
+            )
+        raise ValueError("OPENROUTER_API_KEY and GOOGLE_API_KEY are not set in environment.")
+    return ChatOpenAI(
+        model="anthropic/claude-haiku-4.5",
+        openai_api_key=key_to_use,
+        openai_api_base="https://openrouter.ai/api/v1",
+        default_headers={
+            "HTTP-Referer": "http://localhost:3000",
+            "X-OpenRouter-Title": "BP Store Manager AI Copilot"
+        },
+        temperature=0.7
+    )

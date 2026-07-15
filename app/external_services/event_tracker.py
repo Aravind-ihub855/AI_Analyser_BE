@@ -5,8 +5,8 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
-async def get_local_events(city: str) -> str:
-    """Queries PredictHQ events API for active/upcoming events in a city."""
+async def get_local_events(city: str, days: int = 7) -> str:
+    """Queries PredictHQ events API for active/upcoming events in a city within a window of days."""
     api_key = os.getenv("PREDICTHQ_API_KEY")
     if not api_key:
         logger.warning("PREDICTHQ_API_KEY not set in environment.")
@@ -33,50 +33,30 @@ async def get_local_events(city: str) -> str:
         location_param = {"q": city}
         
     current_date = datetime.now().strftime("%Y-%m-%d")
-    try:
-        tomorrow_date = (datetime.strptime(current_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-    except Exception:
-        tomorrow_date = current_date
+    end_date = (datetime.now() + timedelta(days=max(1, days))).strftime("%Y-%m-%d")
     
-    # Query 1: Today's events
-    params_today = {
+    # Query with a larger limit (100) and sort by rank (descending) so we get the major events across the week
+    params = {
         **location_param,
         "start.gte": current_date,
-        "start.lte": current_date,
-        "limit": 3,
-        "sort": "start"
-    }
-    
-    # Query 2: Future events (tomorrow onwards)
-    params_future = {
-        **location_param,
-        "start.gte": tomorrow_date,
-        "limit": 3,
-        "sort": "start"
+        "start.lte": end_date,
+        "limit": 100,
+        "sort": "rank"
     }
 
     try:
         async with httpx.AsyncClient() as client:
-            res_today = await client.get(url, headers=headers, params=params_today, timeout=12.0)
-            res_future = await client.get(url, headers=headers, params=params_future, timeout=12.0)
+            res = await client.get(url, headers=headers, params=params, timeout=12.0)
             
             results = []
-            if res_today.status_code == 200:
-                results.extend(res_today.json().get("results", []))
+            if res.status_code == 200:
+                results = res.json().get("results", [])
             else:
-                logger.warning(f"PredictHQ today query returned code {res_today.status_code}")
-                
-            if res_future.status_code == 200:
-                results.extend(res_future.json().get("results", []))
-            else:
-                logger.warning(f"PredictHQ future query returned code {res_future.status_code}")
+                logger.warning(f"PredictHQ query returned code {res.status_code}")
                 
             if not results:
-                return f"No active/upcoming events found for: '{city}'."
+                return f"No active/upcoming events found for: '{city}' within the next {days} days."
                 
-            # Sort chronologically by start date
-            results.sort(key=lambda e: e.get("start", ""))
-            
             # De-duplicate events by ID to be safe
             seen_ids = set()
             unique_results = []
@@ -86,8 +66,39 @@ async def get_local_events(city: str) -> str:
                     seen_ids.add(rid)
                     unique_results.append(r)
             
+            # Group events by unique date (YYYY-MM-DD)
+            from collections import defaultdict
+            events_by_date = defaultdict(list)
+            for r in unique_results:
+                date_str = r.get("start", "")[:10]
+                events_by_date[date_str].append(r)
+            
+            selected_events = []
+            start_dt = datetime.strptime(current_date, "%Y-%m-%d")
+            
+            # First pass: Pick the single highest rank event for each unique day of the requested window
+            for d in range(max(1, days) + 1):
+                date_str = (start_dt + timedelta(days=d)).strftime("%Y-%m-%d")
+                day_events = events_by_date.get(date_str, [])
+                if day_events:
+                    # The list unique_results is already sorted by rank descending from the API, 
+                    # so the first event in day_events is the highest-ranked one for that day.
+                    selected_events.append(day_events[0])
+            
+            # Second pass: If we have fewer than 8 events, fill up with the next highest-rank events from any day
+            if len(selected_events) < 8:
+                selected_ids = {e.get("id") for e in selected_events}
+                remaining_events = [r for r in unique_results if r.get("id") not in selected_ids]
+                for r in remaining_events:
+                    if len(selected_events) >= 8:
+                        break
+                    selected_events.append(r)
+                    
+            # Sort the final selected events chronologically
+            selected_events.sort(key=lambda e: e.get("start", ""))
+            
             formatted_events = []
-            for idx, event in enumerate(unique_results[:5], 1):
+            for idx, event in enumerate(selected_events[:8], 1):
                 title = event.get("title")
                 category = event.get("category", "General").capitalize()
                 start = event.get("start", "")[:10]
