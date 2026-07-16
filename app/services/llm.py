@@ -166,7 +166,7 @@ def get_openrouter_llm(api_key: str = None):
         openai_api_base="https://openrouter.ai/api/v1",
         default_headers={
             "HTTP-Referer": "http://localhost:3000",
-            "X-OpenRouter-Title": "BP Store Manager AI Copilot"
+            "X-OpenRouter-Title": "AI Assistant"
         },
         temperature=0.7
     )

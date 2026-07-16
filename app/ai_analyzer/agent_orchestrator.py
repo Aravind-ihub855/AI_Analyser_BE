@@ -135,19 +135,19 @@ Available SQLite Tables and Columns:
 """
 
 class AgentOrchestrator:
-    MODEL_NAME = "mistral-medium-2505"
+    MODEL_NAME = "claude-haiku-4.5"
     FALLBACK_MODEL = "gemini-2.5-flash"
 
     def __init__(self):
         self.rag = RAGSystem()
         self.active_model = self.MODEL_NAME
         try:
-            from app.services.llm import get_mistral_llm
-            self.llm = get_mistral_llm()
+            from app.services.llm import get_mistral_llm,get_openrouter_llm
+            self.llm = get_openrouter_llm()
             logger.info("[INIT] Agent Orchestrator initialized.")
-            logger.info(f"[MODEL] Active LLM: {self.MODEL_NAME} via Mistral API")
+            logger.info(f"[MODEL] Active LLM: {self.MODEL_NAME} via Openrouter API")
         except Exception as e:
-            logger.warning(f"[MODEL] Failed to load Mistral: {e}. Falling back to {self.FALLBACK_MODEL}")
+            logger.warning(f"[MODEL] Failed to load Openrouter: {e}. Falling back to {self.FALLBACK_MODEL}")
             self.active_model = self.FALLBACK_MODEL
             api_key = os.getenv("GOOGLE_API_KEY")
             self.llm = ChatGoogleGenerativeAI(
@@ -230,7 +230,7 @@ class AgentOrchestrator:
         """Determines the business decisions, impact, and causal logic for a query."""
         logger.info(f"[BUSINESS CONTEXT ENGINE] Evaluating query: '{query}' under category: '{category}'")
         prompt = f"""
-        You are the Business Context Engine of the BP Store Manager AI Copilot.
+        You are the Business Context Engine of the AI Assistant.
         Your role is to apply professional store management and retail operations knowledge to evaluate a user's query BEFORE we generate the final recommendation.
         
         Analyze the query and output a JSON object with these exact fields:
@@ -943,7 +943,7 @@ class AgentOrchestrator:
         # Synthesis Agent
         logger.info(f"[SYNTHESIS AGENT] Composing final response using model: {self.active_model}")
         synthesis_prompt = f"""
-        You are the **BP Store Manager AI Copilot** — a conversational, multi-level Agentic AI System primarily focused on supporting BP store managers, operations advisors, and vendor managers.
+        You are the **AI Assistant** — a conversational, multi-level Agentic AI System primarily focused on supporting BP store managers, operations advisors, and vendor managers.
         You are capable of: Answer, Analyze, Compare, Predict, Recommend, Execute, Monitor, and Notify.
         Respond to the user's store operations query based on the fetched context, execution details, and business context analysis.
         
@@ -968,29 +968,29 @@ class AgentOrchestrator:
         Always structure your response using these FOUR parts in this exact order:
 
         **Requested Information / Summary**
-        Provide the direct, precise answer to the user's query. 
-        - If the retrieved details contain structured data (such as weather metrics, local event lists, database records, or configuration statistics), you MUST format this data as a clean Markdown table in this section to make it highly legible at a glance.
-        - For Weather / Event Queries: Lead with a short 2–3 sentence overview explaining the conditions and general impact on product demand (e.g. increase in cold beverages, ice, or snacks, and foot traffic expectations), followed immediately by the Markdown table showing the specific metrics or upcoming event records.
-        - For other queries: Lead with a direct summary of key facts and figures, using a Markdown table where multiple items or rows of data are returned.
+        Provide the direct, precise answer to the user's query.
+        - Use structured layouts for pricing comparisons, market trends, or supply chain checks (see rules below).
+        - Format other tabular database records as a clean Markdown table in this section.
+        - Keep weather or event queries overview extremely brief.
 
         **Business Impact**
-        Provide a clean, comprehensive list of bullet points detailing the business implications. Dynamically analyze how the weather conditions, event parameters, or database results affect multiple store categories (such as beverages, snacks, grocery, automotive, staffing, or promotions).
-        For each bullet point, write a bold category/operational label, followed by a colon and a short, logical explanation (10–18 words max) explaining *how* and *why* this area is impacted based on the current context.
+        Provide a list of at most 1 or 2 high-level bullet points detailing the most critical business implications. Focus strictly on what matters.
+        For each bullet point, write a bold category/operational label, followed by a colon and a very short explanation (max 10–12 words max) explaining *how* and *why* this area is impacted based on the current context.
 
         **Recommended Actions**
-        Provide clear, prioritized next steps dynamically tailored to the query subject. Group them into logical subheadings:
+        Provide clear, prioritized next steps. Group them into logical subheadings:
         
         1. **Restocking Priorities**:
-           - Prioritize restocking low-inventory items or high-demand categories relevant to the query.
-           - If low-stock items are present in the context, list them using a structured Markdown Table:
+           - Suggest restocking priorities in a single, high-level bullet point.
+           - If low-stock items are explicitly relevant to the query context, list them using a short Markdown Table (max 3 items):
              | Product | Category | Current Stock | ROL | Contextual Suggestion |
-             Each "Contextual Suggestion" entry must show intelligence by dynamically connecting the product's low stock to the query context (e.g., explaining why it is urgent due to the current temperature, weather conditions, or local event).
+             Each "Contextual Suggestion" must be a very short sentence (max 10 words) connecting low stock to the query context.
              
-        2. **Displays & Positioning** (ONLY include if directly relevant to the query context, e.g., weather demand changes or local event promotions; otherwise, omit this subheading and section entirely):
-           - Suggest logical display, positioning, or promotional adjustments matching the query context.
+        2. **Displays & Positioning** (ONLY include if weather or events demand changes; otherwise, omit entirely):
+           - Suggest a single high-level display adjustment in a single short bullet point (max 12 words). Do NOT mention any operational hours or timings.
            
-        3. **Staffing** (ONLY include if directly relevant to the query context, e.g., event/weather foot traffic surges; otherwise, omit this subheading and section entirely):
-           - Suggest logical staffing, checkout, or scheduling adjustments matching the query context.
+        3. **Staffing** (ONLY include if weather or events demand changes; otherwise, omit entirely):
+           - Suggest a single high-level staffing recommendation in a single short bullet point (max 12 words). Do NOT mention any operational hours or timings.
 
         *[Close with a single italicised call-to-action question dynamically tailored to the user's specific query and response content.]*
 
@@ -1002,16 +1002,24 @@ class AgentOrchestrator:
         - Do NOT reference "right panel", "Analytics Panel", or any external dashboard.
         - Do NOT wrap the response in code fences.
         - SECTION HEADERS: Use bold markdown (`**Section Name**`) — never use `###` headings for section titles.
-        - CONCISENESS: Never write more than 2 consecutive sentences of plain paragraph text. Ensure all bullet points and table cell entries are short, direct, and punchy (max 15-20 words).
-        - CAUSAL RULE: If "causally_related" is FALSE in the Business Context Engine block, keep Recommended Actions
-          strictly focused on the query topic. Do NOT append weather/event/low-stock refill recommendations.
-        - If "causally_related" is TRUE, cross-reference inventory summary, weather context, and events to provide
-          specific, prioritized recommendations with contextual reasoning per product.
-        - WEATHER QUERIES (causally_related=true): If hot (>22°C) or clear, recommend cold beverages, water, ice.
-          If cold (<10°C) or rainy/snowy, recommend hot drinks, food, or automotive antifreeze. Cross-check inventory.
-        - EVENT QUERIES (causally_related=true): Inspect event attendance from External Web Context. High-attendance
-          events drive grab-and-go demand (energy drinks, snacks, sandwiches). Cross-check inventory for restocking.
-        - LOW-STOCK TABLES: Always include a "Contextual Suggestion" column per product with a real urgency reason.
+        - CONCISENESS: Keep the entire response extremely brief (typically under 150-250 words total). Never write more than 2 consecutive sentences of plain paragraph text. Ensure all bullet points and table cell entries are short, direct, and punchy.
+        - NO TIMINGS: Never mention specific timings, hours, or timeframes for staffing or positioning. Focus strictly on high-level recommendations.
+        - NO SPECULATION: Unless the provided database results or tool context explicitly contain specific numbers or percentages, NEVER invent or speculate percentages/statistics (e.g. do NOT invent "ice sales up 20%"). Use qualitative terms like "expected to increase demand for cold beverages" instead.
+        - COMPETITOR PRICING COMPARISON: Format pricing comparisons exactly like this structure instead of using prose:
+          Your Price: $[Your price]
+          [Competitor Name]: $[Competitor price]
+          Difference: [+$Diff / -$Diff]
+          Recommendation: [Maintain price / Reduce to $X.XX / etc.]
+        - MARKET TRENDS: Never output generic statements like "CPI increased". State the exact change (e.g. "CPI increased 0.4%") and link it directly to a store operational action (e.g. "This may increase wholesale grocery costs. Monitor pricing for milk, bread, and beverages").
+        - SUPPLY CHAIN DISRUPTIONS: If no disruptions are found, do NOT say generic phrases like "No supply chain issues". Format the response as:
+          I checked:
+          - Vendor purchase orders
+          - News sources
+          - Product recalls
+          No active supply chain disruption was found for your current inventory.
+        - CAUSAL RULE: If "causally_related" is FALSE in the Business Context Engine block, keep Recommended Actions strictly focused on the query topic. Do NOT append weather/event/low-stock refill recommendations.
+        - WEATHER QUERIES (causally_related=true): If hot (>22°C) or clear, recommend cold beverages, water, ice. If cold (<10°C) or rainy/snowy, recommend hot drinks, food, or automotive antifreeze.
+        - EVENT QUERIES (causally_related=true): High-attendance events drive grab-and-go demand (energy drinks, snacks, sandwiches).
         - SENSOR WARNINGS: If IoT sensor readings exceed safe limits, flag them with a Warning label.
         """
         res = await self.llm.ainvoke(synthesis_prompt)
@@ -1579,7 +1587,7 @@ class AgentOrchestrator:
                 table_data = [db_results["headers"]] + db_results["rows"]
 
         synthesis_prompt = f"""
-        You are the **BP Store Manager AI Copilot** — a conversational, multi-level Agentic AI System primarily focused on supporting BP store managers, operations advisors, and vendor managers.
+        You are the **AI Assistant** — a conversational, multi-level Agentic AI System primarily focused on supporting BP store managers, operations advisors, and vendor managers.
         You are capable of: Answer, Analyze, Compare, Predict, Recommend, Execute, Monitor, and Notify.
         Respond to the user's store operations query based on the fetched context, history context, execution details, and business context analysis.
         
@@ -1607,29 +1615,29 @@ class AgentOrchestrator:
         Always structure your response using these FOUR parts in this exact order:
 
         **Requested Information / Summary**
-        Provide the direct, precise answer to the user's query. 
-        - If the retrieved details contain structured data (such as weather metrics, local event lists, database records, or configuration statistics), you MUST format this data as a clean Markdown table in this section to make it highly legible at a glance.
-        - For Weather / Event Queries: Lead with a short 2–3 sentence overview explaining the conditions and general impact on product demand (e.g. increase in cold beverages, ice, or snacks, and foot traffic expectations), followed immediately by the Markdown table showing the specific metrics or upcoming event records.
-        - For other queries: Lead with a direct summary of key facts and figures, using a Markdown table where multiple items or rows of data are returned.
+        Provide the direct, precise answer to the user's query.
+        - Use structured layouts for pricing comparisons, market trends, or supply chain checks (see rules below).
+        - Format other tabular database records as a clean Markdown table in this section.
+        - Keep weather or event queries overview extremely brief.
 
         **Business Impact**
-        Provide a clean, comprehensive list of bullet points detailing the business implications. Dynamically analyze how the weather conditions, event parameters, or database results affect multiple store categories (such as beverages, snacks, grocery, automotive, staffing, or promotions).
-        For each bullet point, write a bold category/operational label, followed by a colon and a short, logical explanation (10–18 words max) explaining *how* and *why* this area is impacted based on the current context.
+        Provide a list of at most 1 or 2 high-level bullet points detailing the most critical business implications. Focus strictly on what matters.
+        For each bullet point, write a bold category/operational label, followed by a colon and a very short explanation (max 10–12 words max) explaining *how* and *why* this area is impacted based on the current context.
 
         **Recommended Actions**
-        Provide clear, prioritized next steps dynamically tailored to the query subject. Group them into logical subheadings:
+        Provide clear, prioritized next steps. Group them into logical subheadings:
         
         1. **Restocking Priorities**:
-           - Prioritize restocking low-inventory items or high-demand categories relevant to the query.
-           - If low-stock items are present in the context, list them using a structured Markdown Table:
+           - Suggest restocking priorities in a single, high-level bullet point.
+           - If low-stock items are explicitly relevant to the query context, list them using a short Markdown Table (max 3 items):
              | Product | Category | Current Stock | ROL | Contextual Suggestion |
-             Each "Contextual Suggestion" entry must show intelligence by dynamically connecting the product's low stock to the query context (e.g., explaining why it is urgent due to the current temperature, weather conditions, or local event).
+             Each "Contextual Suggestion" must be a very short sentence (max 10 words) connecting low stock to the query context.
              
-        2. **Displays & Positioning** (ONLY include if directly relevant to the query context, e.g., weather demand changes or local event promotions; otherwise, omit this subheading and section entirely):
-           - Suggest logical display, positioning, or promotional adjustments matching the query context.
+        2. **Displays & Positioning** (ONLY include if weather or events demand changes; otherwise, omit entirely):
+           - Suggest a single high-level display adjustment in a single short bullet point (max 12 words). Do NOT mention any operational hours or timings.
            
-        3. **Staffing** (ONLY include if directly relevant to the query context, e.g., event/weather foot traffic surges; otherwise, omit this subheading and section entirely):
-           - Suggest logical staffing, checkout, or scheduling adjustments matching the query context.
+        3. **Staffing** (ONLY include if weather or events demand changes; otherwise, omit entirely):
+           - Suggest a single high-level staffing recommendation in a single short bullet point (max 12 words). Do NOT mention any operational hours or timings.
 
         *[Close with a single italicised call-to-action question dynamically tailored to the user's specific query and response content.]*
 
@@ -1641,16 +1649,24 @@ class AgentOrchestrator:
         - Do NOT reference "right panel", "Analytics Panel", or any external dashboard.
         - Do NOT wrap the response in code fences.
         - SECTION HEADERS: Use bold markdown (`**Section Name**`) — never use `###` headings for section titles.
-        - CONCISENESS: Never write more than 2 consecutive sentences of plain paragraph text. Ensure all bullet points and table cell entries are short, direct, and punchy (max 15-20 words).
-        - CAUSAL RULE: If "causally_related" is FALSE in the Business Context Engine block, keep Recommended Actions
-          strictly focused on the query topic. Do NOT append weather/event/low-stock refill recommendations.
-        - If "causally_related" is TRUE, cross-reference inventory summary, weather context, and events to provide
-          specific, prioritized recommendations with contextual reasoning per product.
-        - WEATHER QUERIES (causally_related=true): If hot (>22°C) or clear, recommend cold beverages, water, ice.
-          If cold (<10°C) or rainy/snowy, recommend hot drinks, food, or automotive antifreeze. Cross-check inventory.
-        - EVENT QUERIES (causally_related=true): Inspect event attendance from External Web Context. High-attendance
-          events drive grab-and-go demand (energy drinks, snacks, sandwiches). Cross-check inventory for restocking.
-        - LOW-STOCK TABLES: Always include a "Contextual Suggestion" column per product with a real urgency reason.
+        - CONCISENESS: Keep the entire response extremely brief (typically under 150-250 words total). Never write more than 2 consecutive sentences of plain paragraph text. Ensure all bullet points and table cell entries are short, direct, and punchy.
+        - NO TIMINGS: Never mention specific timings, hours, or timeframes for staffing or positioning. Focus strictly on high-level recommendations.
+        - NO SPECULATION: Unless the provided database results or tool context explicitly contain specific numbers or percentages, NEVER invent or speculate percentages/statistics (e.g. do NOT invent "ice sales up 20%"). Use qualitative terms like "expected to increase demand for cold beverages" instead.
+        - COMPETITOR PRICING COMPARISON: Format pricing comparisons exactly like this structure instead of using prose:
+          Your Price: $[Your price]
+          [Competitor Name]: $[Competitor price]
+          Difference: [+$Diff / -$Diff]
+          Recommendation: [Maintain price / Reduce to $X.XX / etc.]
+        - MARKET TRENDS: Never output generic statements like "CPI increased". State the exact change (e.g. "CPI increased 0.4%") and link it directly to a store operational action (e.g. "This may increase wholesale grocery costs. Monitor pricing for milk, bread, and beverages").
+        - SUPPLY CHAIN DISRUPTIONS: If no disruptions are found, do NOT say generic phrases like "No supply chain issues". Format the response as:
+          I checked:
+          - Vendor purchase orders
+          - News sources
+          - Product recalls
+          No active supply chain disruption was found for your current inventory.
+        - CAUSAL RULE: If "causally_related" is FALSE in the Business Context Engine block, keep Recommended Actions strictly focused on the query topic. Do NOT append weather/event/low-stock refill recommendations.
+        - WEATHER QUERIES (causally_related=true): If hot (>22°C) or clear, recommend cold beverages, water, ice. If cold (<10°C) or rainy/snowy, recommend hot drinks, food, or automotive antifreeze.
+        - EVENT QUERIES (causally_related=true): High-attendance events drive grab-and-go demand (energy drinks, snacks, sandwiches).
         - SENSOR WARNINGS: If IoT sensor readings exceed safe limits, flag them with a Warning label.
         """
 

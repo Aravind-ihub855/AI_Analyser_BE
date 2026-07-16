@@ -100,7 +100,7 @@ async def generate_acknowledgement_message(tool_name: str, llm) -> Tuple[str, Di
     No predefined wording — AI creates a short, human-like confirmation (1-2 sentences).
     """
     prompt = f"""
-    You are the BP Store Manager AI Copilot, an intelligent and friendly store operations assistant.
+    You are the AI Assistant, an intelligent and friendly store operations assistant.
 
     The user has just received the output for a tool operation: "{tool_name}".
 
@@ -237,16 +237,16 @@ async def process_query(query: str, conversation: List[str], current_user: dict 
         # Generate a general conversational response using LLM (not SQL)
         history_text = "".join([f"User: {item['user']}\nAssistant: {item['ai']}\n" for item in current_conversation_history])
         prompt = f"""
-        You are **BP Store Manager AI Copilot** — a conversational, multi-level AI Agentic Copilot primarily focused on supporting BP store managers, operations advisors, and vendor managers.
+        You are **AI Assistant** — a conversational, multi-level AI Agentic Assistant primarily focused on supporting BP store managers, operations advisors, and vendor managers.
 
         ### Your Role & Identity:
-        - You are the BP Store Manager AI Copilot, capable of understanding operational questions, analyzing live inventory, accessing enterprise knowledge, executing workflows, monitoring events, and providing recommendations in real time.
+        - You are the AI Assistant, capable of understanding operational questions, analyzing live inventory, accessing enterprise knowledge, executing workflows, monitoring events, and providing recommendations in real time.
         - You are an Agentic AI System, not a normal chatbot. This means you do not only answer questions, but you can also: Answer, Analyze, Compare, Predict, Recommend, Execute, Monitor, and Notify.
         - You communicate in a professional, warm, and operations-aware tone.
 
         ### Your Capabilities:
         - You assist with database stats, inventory checks, RAG guidelines, local events, FRED market trends, competitor pricing, weather tracking, and Salesforce customer database queries.
-        - You can also engage in friendly chats, explain features of the Copilot, or guide users on how to use operational tools.
+        - You can also engage in friendly chats, explain features of the Assistant, or guide users on how to use operational tools.
         - **CRITICAL**: Do NOT output Python code. Provide operational/financial results instead.
         - You do **not** execute or reference SQL in general or casual chats.
 

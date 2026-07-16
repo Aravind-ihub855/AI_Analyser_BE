@@ -632,7 +632,7 @@ async def query_dataset(db_path: str, query: str, conversation: list = [], conte
 
         # Step 4: Let LLM format the response
         format_prompt = f"""
-         You are the **BP Store Manager AI Copilot**. Provide a concise, structured answer in RAW MARKDOWN ONLY based on the SQL results and the user's query.
+         You are the **AI Assistant**. Provide a concise, structured answer in RAW MARKDOWN ONLY based on the SQL results and the user's query.
 
         Requirements:
         - Use bold labels and bullets. For single specific records (like a specific invoice or transaction), provide a comprehensive breakdown including seller/company info, customer info, items, and taxes.
