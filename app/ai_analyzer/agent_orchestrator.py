@@ -14,128 +14,128 @@ logger = logging.getLogger(__name__)
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "db", "store_ops.db")
 
 DB_SCHEMA_REFERENCE = """
-Available SQLite Tables and Columns:
-1. Table 'products':
-   - id (TEXT)
-   - product_code (TEXT, e.g. 'BP-PROD-001') - unique product code (matches inventory.code and sales.code)
-   - product_name (TEXT, e.g. 'Castrol GTX 5W30 (1 Quart)')
-   - category (TEXT, e.g. 'Automotive', 'Food', 'Beverages', 'Fuel')
-   - brand (TEXT)
-   - unit_price (REAL, selling price)
-   - vendor_id (TEXT, matches vendors.id)
-   - status (TEXT)
+    Available SQLite Tables and Columns:
+    1. Table 'products':
+    - id (TEXT)
+    - product_code (TEXT, e.g. 'BP-PROD-001') - unique product code (matches inventory.code and sales.code)
+    - product_name (TEXT, e.g. 'Castrol GTX 5W30 (1 Quart)')
+    - category (TEXT, e.g. 'Automotive', 'Food', 'Beverages', 'Fuel')
+    - brand (TEXT)
+    - unit_price (REAL, selling price)
+    - vendor_id (TEXT, matches vendors.id)
+    - status (TEXT)
 
-2. Table 'inventory':
-   - id (TEXT)
-   - store_id (TEXT, matches stores.id, e.g. 'BP-CHI-1024')
-   - code (TEXT, matches products.product_code) - unique product SKU code
-   - name (TEXT, e.g. 'Castrol GTX 5W30 (1 Quart)')
-   - category (TEXT)
-   - uom (TEXT, e.g. 'Litres', 'Units')
-   - unit_price (REAL)
-   - storage_location (TEXT)
-   - rol (INTEGER, Reorder Level)
-   - roq (INTEGER, Reorder Quantity)
-   - colour (TEXT)
-   - viscosity (TEXT)
-   - vendor_id (TEXT, matches vendors.id)
-   - lead_time_days (INTEGER)
-   - current_stock (INTEGER, current inventory level)
-   - safety_stock_level (INTEGER)
-   - predicted_stockout_date (TEXT, date)
-   - avg_daily_consumption (REAL)
-   - recommended_roq (INTEGER)
-   - order_by_date (TEXT, date)
-   - pr_mr_status (TEXT)
-   - risk_level (TEXT, 'Low', 'Medium', 'High')
-   - service_level (INTEGER)
+    2. Table 'inventory':
+    - id (TEXT)
+    - store_id (TEXT, matches stores.id, e.g. 'BP-CHI-1024')
+    - code (TEXT, matches products.product_code) - unique product SKU code
+    - name (TEXT, e.g. 'Castrol GTX 5W30 (1 Quart)')
+    - category (TEXT)
+    - uom (TEXT, e.g. 'Litres', 'Units')
+    - unit_price (REAL)
+    - storage_location (TEXT)
+    - rol (INTEGER, Reorder Level)
+    - roq (INTEGER, Reorder Quantity)
+    - colour (TEXT)
+    - viscosity (TEXT)
+    - vendor_id (TEXT, matches vendors.id)
+    - lead_time_days (INTEGER)
+    - current_stock (INTEGER, current inventory level)
+    - safety_stock_level (INTEGER)
+    - predicted_stockout_date (TEXT, date)
+    - avg_daily_consumption (REAL)
+    - recommended_roq (INTEGER)
+    - order_by_date (TEXT, date)
+    - pr_mr_status (TEXT)
+    - risk_level (TEXT, 'Low', 'Medium', 'High')
+    - service_level (INTEGER)
 
-3. Table 'purchase_orders':
-   - id (TEXT, e.g. 'PO-10000') - purchase order ID
-   - vendor_id (TEXT, matches vendors.id)
-   - vendor_name (TEXT)
-   - store_id (TEXT, matches stores.id)
-   - items (TEXT, JSON array of objects like [{"name": "Pringles...", "quantity": 100}])
-   - total_amount (REAL)
-   - status (TEXT, 'Delayed', 'Pending', 'Delivered')
-   - order_date (TEXT, date)
-   - expected_delivery_date (TEXT, date)
-   - actual_delivery_date (TEXT, date or null)
-   - expected_items (INTEGER)
-   - received_items (INTEGER)
-   - rejected_items (INTEGER)
-   - accepted_items (INTEGER)
-   - lead_time_days (REAL)
-   - on_time_target (REAL)
+    3. Table 'purchase_orders':
+    - id (TEXT, e.g. 'PO-10000') - purchase order ID
+    - vendor_id (TEXT, matches vendors.id)
+    - vendor_name (TEXT)
+    - store_id (TEXT, matches stores.id)
+    - items (TEXT, JSON array of objects like [{"name": "Pringles...", "quantity": 100}])
+    - total_amount (REAL)
+    - status (TEXT, 'Delayed', 'Pending', 'Delivered')
+    - order_date (TEXT, date)
+    - expected_delivery_date (TEXT, date)
+    - actual_delivery_date (TEXT, date or null)
+    - expected_items (INTEGER)
+    - received_items (INTEGER)
+    - rejected_items (INTEGER)
+    - accepted_items (INTEGER)
+    - lead_time_days (REAL)
+    - on_time_target (REAL)
 
-4. Table 'vendors':
-   - id (TEXT, e.g. 'VND-001') - vendor ID
-   - name (TEXT)
-   - contact (TEXT)
-   - email (TEXT)
-   - is_external (INTEGER, boolean 1/0)
-   - type (TEXT)
-   - region (TEXT)
-   - city (TEXT)
-   - onboarding_date (TEXT)
-   - managed_by (TEXT)
-   - contract_status (TEXT)
-   - payment_terms (TEXT)
+    4. Table 'vendors':
+    - id (TEXT, e.g. 'VND-001') - vendor ID
+    - name (TEXT)
+    - contact (TEXT)
+    - email (TEXT)
+    - is_external (INTEGER, boolean 1/0)
+    - type (TEXT)
+    - region (TEXT)
+    - city (TEXT)
+    - onboarding_date (TEXT)
+    - managed_by (TEXT)
+    - contract_status (TEXT)
+    - payment_terms (TEXT)
 
-5. Table 'vendor_issues':
-   - id (TEXT, e.g. 'ISSUE-1000')
-   - vendor_id (TEXT)
-   - vendor_name (TEXT)
-   - issue_type (TEXT)
-   - description (TEXT)
-   - date_reported (TEXT, date)
-   - status (TEXT, 'Open', 'Resolved')
-   - priority (TEXT, 'High', 'Low')
-   - related_po (TEXT, matches purchase_orders.id)
+    5. Table 'vendor_issues':
+    - id (TEXT, e.g. 'ISSUE-1000')
+    - vendor_id (TEXT)
+    - vendor_name (TEXT)
+    - issue_type (TEXT)
+    - description (TEXT)
+    - date_reported (TEXT, date)
+    - status (TEXT, 'Open', 'Resolved')
+    - priority (TEXT, 'High', 'Low')
+    - related_po (TEXT, matches purchase_orders.id)
 
-6. Table 'stores':
-   - id (TEXT, e.g. 'BP-CHI-1024')
-   - name (TEXT)
-   - city (TEXT)
-   - address (TEXT)
-   - contact (TEXT)
-   - active_since (TEXT)
-   - products (TEXT, JSON list of products)
+    6. Table 'stores':
+    - id (TEXT, e.g. 'BP-CHI-1024')
+    - name (TEXT)
+    - city (TEXT)
+    - address (TEXT)
+    - contact (TEXT)
+    - active_since (TEXT)
+    - products (TEXT, JSON list of products)
 
-7. Table 'recommendations':
-   - id (TEXT, e.g. 'REC-1')
-   - type (TEXT)
-   - description (TEXT)
-   - action_label (TEXT)
-   - priority (TEXT)
+    7. Table 'recommendations':
+    - id (TEXT, e.g. 'REC-1')
+    - type (TEXT)
+    - description (TEXT)
+    - action_label (TEXT)
+    - priority (TEXT)
 
-8. Table 'sales':
-   - transaction_id (TEXT, e.g. 'TX-100001')
-   - timestamp (TEXT, datetime format 'YYYY-MM-DD HH:MM:SS')
-   - store_id (TEXT)
-   - code (TEXT, matches products.product_code and inventory.code)
-   - name (TEXT)
-   - category (TEXT)
-   - quantity (REAL or INTEGER)
-   - price (REAL)
-   - total_amount (REAL)
-   - payment_method (TEXT)
+    8. Table 'sales':
+    - transaction_id (TEXT, e.g. 'TX-100001')
+    - timestamp (TEXT, datetime format 'YYYY-MM-DD HH:MM:SS')
+    - store_id (TEXT)
+    - code (TEXT, matches products.product_code and inventory.code)
+    - name (TEXT)
+    - category (TEXT)
+    - quantity (REAL or INTEGER)
+    - price (REAL)
+    - total_amount (REAL)
+    - payment_method (TEXT)
 
-9. Table 'purchase_history':
-   - id (TEXT, unique mongo ID)
-   - purchase_id (TEXT, e.g. 'PUR-20260714115928-8525')
-   - store_id (TEXT, matches stores.id)
-   - customer_id (TEXT, e.g. 'CUS-0021')
-   - customer_name (TEXT, e.g. 'Noah Surname1')
-   - items (TEXT, JSON array of purchased items, e.g. '[{"product_code": "BP-PROD-081", "product_name": "Milk", "category": "Grocery", "quantity": 1, "unit_price": 28.99, "total_price": 28.99}]')
-   - total_amount (REAL, total purchase cost)
-   - item_count (INTEGER, total items in purchase)
-   - purchase_timestamp (TEXT/TIMESTAMP, purchase date/time, e.g. '2026-07-14 11:59:28')
-   - payment_method (TEXT, e.g. 'Credit Card', 'Debit Card')
-"""
+    9. Table 'purchase_history':
+    - id (TEXT, unique mongo ID)
+    - purchase_id (TEXT, e.g. 'PUR-20260714115928-8525')
+    - store_id (TEXT, matches stores.id)
+    - customer_id (TEXT, e.g. 'CUS-0021')
+    - customer_name (TEXT, e.g. 'Noah Surname1')
+    - items (TEXT, JSON array of purchased items, e.g. '[{"product_code": "BP-PROD-081", "product_name": "Milk", "category": "Grocery", "quantity": 1, "unit_price": 28.99, "total_price": 28.99}]')
+    - total_amount (REAL, total purchase cost)
+    - item_count (INTEGER, total items in purchase)
+    - purchase_timestamp (TEXT/TIMESTAMP, purchase date/time, e.g. '2026-07-14 11:59:28')
+    - payment_method (TEXT, e.g. 'Credit Card', 'Debit Card')
+    """
 
 class AgentOrchestrator:
-    MODEL_NAME = "claude-haiku-4.5"
+    MODEL_NAME = "mistral-medium-2505"
     FALLBACK_MODEL = "gemini-2.5-flash"
 
     def __init__(self):
@@ -143,11 +143,11 @@ class AgentOrchestrator:
         self.active_model = self.MODEL_NAME
         try:
             from app.services.llm import get_mistral_llm,get_openrouter_llm
-            self.llm = get_openrouter_llm()
+            self.llm = get_mistral_llm()
             logger.info("[INIT] Agent Orchestrator initialized.")
-            logger.info(f"[MODEL] Active LLM: {self.MODEL_NAME} via Openrouter API")
+            logger.info(f"[MODEL] Active LLM: {self.MODEL_NAME} via Mistral API")
         except Exception as e:
-            logger.warning(f"[MODEL] Failed to load Openrouter: {e}. Falling back to {self.FALLBACK_MODEL}")
+            logger.warning(f"[MODEL] Failed to load Mistral: {e}. Falling back to {self.FALLBACK_MODEL}")
             self.active_model = self.FALLBACK_MODEL
             api_key = os.getenv("GOOGLE_API_KEY")
             self.llm = ChatGoogleGenerativeAI(
@@ -163,9 +163,7 @@ class AgentOrchestrator:
         Analyze the user's operational query and categorize it into one of these categories:
         - "db": Questions needing database stats, inventory, POs, vendors, sales, product analysis, store profile highlights, or KPI metrics summaries (e.g., total products count, inventory valuation, stockout counts, reorder status, or overdue purchase orders).
         - "rag": Questions about operating guidelines, SOPs, safety response plans, compliance, HR, cash reconciliations. Do NOT route store profile/performance highlights here.
-        - "live": Questions about active IoT sensor readings (temperature check, leakage check).
         - "external": Questions that need competitor pricing, local/public events near the store, national market trends (inflation, oil prices, FRED), current weather for cities/regions, general web search queries, or client/customer lookup in the Salesforce CRM.
-        - "workflow": Action requests (e.g. reordering items, updates, creating escalation tickets).
         - "conversational": Greetings, small talk, general questions unrelated to store operations.
         - "agentic": Complex queries that require checking multiple distinct sources of information (e.g. checking weather + inventory stock levels, comparing competitor prices + checking local catalog, events + sales trends).
 
@@ -193,14 +191,14 @@ class AgentOrchestrator:
 
         Provide the output in JSON format:
         {{
-          "category": "db" | "rag" | "live" | "external" | "workflow" | "conversational" | "agentic",
+          "category": "db" | "rag" | "external" | "conversational" | "agentic",
           "plan": "One sentence describing how you will resolve this request.",
           "is_complex": true | false,
           "steps": [
              // ONLY populate this array if category is "agentic". List steps sequentially.
              // Each step has: 
-             //   "agent": "db" | "rag" | "live" | "external" | "workflow"
-             //   "query": "Strictly valid SQL query for 'db' agent (e.g. SELECT * FROM inventory WHERE (name LIKE '%chicken noodle%' OR name LIKE '%chicken noodles%')), or search query for RAG/workflow"
+             //   "agent": "db" | "rag" | "external"
+             //   "query": "Strictly valid SQL query for 'db' agent (e.g. SELECT * FROM inventory WHERE (name LIKE '%chicken noodle%' OR name LIKE '%chicken noodles%')), or search query for RAG"
              //   "tool": "Optional. Specific tool for 'external' agent: 'weather' | 'pricing' | 'events' | 'trends' | 'search'"
              //   "param": "Optional. Parameter for external tool. For 'weather' and 'events', this MUST be strictly the city name (e.g., 'Chicago'). Do NOT include timeframe or temporal modifiers like 'today', 'tomorrow', 'next 2 days', or 'next week' inside 'param'."
           ]
@@ -503,22 +501,6 @@ class AgentOrchestrator:
         logger.info(f"[SQL AGENT] Generated SQL:\n{sql}")
         return sql.strip(";")
 
-    def get_live_sensor_readings(self) -> dict:
-        """Fetches simulated real-time IoT metrics."""
-        return {
-            "sensors": [
-                {"sensor_id": "SEN-001", "name": "Wild Bean Milk Chiller", "type": "Temperature", "value": "3.4 °C", "status": "Normal"},
-                {"sensor_id": "SEN-002", "name": "Forecourt Leakage Detector", "type": "Leakage", "value": "0.0 ppm", "status": "Normal"},
-                {"sensor_id": "SEN-003", "name": "Underground Tank 1 Level", "type": "Level", "value": "12,450 L", "status": "Normal"},
-                {"sensor_id": "SEN-004", "name": "Bakery Sandwich Freezer", "type": "Temperature", "value": "-18.2 °C", "status": "Normal"}
-            ],
-            "weather": {
-                "location": "BP Loop Connect, Chicago IL",
-                "condition": "Light rain",
-                "temperature": "14.5 °C",
-                "wind": "18.2 km/h East"
-            }
-        }
 
     def get_inventory_summary(self, store_id: str) -> dict:
         """Fetches a high-level summary of store inventory (low-stock items and category metrics)."""
@@ -745,10 +727,7 @@ class AgentOrchestrator:
                         })
                     tools_used.append("SOP Guidelines")
                 
-                elif step_agent == "live":
-                    live_results_list.append(self.get_live_sensor_readings())
-                    tools_used.append("IoT Sensors")
-            
+
             # Combine all results
             if db_results_list:
                 db_results = {
@@ -802,18 +781,6 @@ class AgentOrchestrator:
                 print(f"      Content Preview: {doc['content'][:150]}...")
             print(f"========================================\n")
  
-        # 3. Live IoT Agent
-        elif category == "live":
-            logger.info("[LIVE AGENT] Fetching real-time IoT sensor readings.")
-            live_results = self.get_live_sensor_readings()
-            logger.info(f"[LIVE AGENT] Retrieved {len(live_results.get('sensors', []))} sensor reading(s).")
-            tools_used.append("IoT Sensors")
-            
-            # Print the tool results directly to the terminal for tracking
-            print(f"\n[TRACKING] === LIVE IoT AGENT TOOL RESULT ===")
-            print(f"IoT Sensors: {live_results.get('sensors')}")
-            print(f"Local Weather: {live_results.get('weather')}")
-            print(f"=============================================\n")
 
         # 4. External Web Services Agent
         elif category == "external":
@@ -925,27 +892,19 @@ class AgentOrchestrator:
                 print(f"Result Preview: {str(external_results)[:300]}...")
                 print(f"=========================================================\n")
 
-        # 5. Workflow Agent
-        elif category == "workflow":
-            logger.info("[WORKFLOW AGENT] Executing workflow action.")
-            if "reorder" in query.lower() or "order" in query.lower():
-                workflow_executed = "Draft Purchase Order created. Assigned ID 'PO-99120'. Items matched to reorder quantities (ROQ). Final manager signature required in ERP/SAP."
-            else:
-                workflow_executed = "Escalation ticket generated: 'Vendor Delivery Issue VND-001' logged in operations log under ID 'TKT-82190'."
-            logger.info(f"[WORKFLOW AGENT] Result: {workflow_executed}")
-            tools_used.append("Workflow Tool")
-            
-            # Print the tool results directly to the terminal for tracking
-            print(f"\n[TRACKING] === WORKFLOW AGENT TOOL RESULT ===")
-            print(f"Workflow Action Executed: {workflow_executed}")
-            print(f"=============================================\n")
 
         # Synthesis Agent
         logger.info(f"[SYNTHESIS AGENT] Composing final response using model: {self.active_model}")
+
         synthesis_prompt = f"""
         You are the **AI Assistant** — a conversational, multi-level Agentic AI System primarily focused on supporting BP store managers, operations advisors, and vendor managers.
-        You are capable of: Answer, Analyze, Compare, Predict, Recommend, Execute, Monitor, and Notify.
         Respond to the user's store operations query based on the fetched context, execution details, and business context analysis.
+        
+        Your goal is to act as an **assertive, highly intelligent business advisor (BP Store Manager)**. Managers don't just need information; they need:
+        - clear priorities
+        - strong, prescriptive recommendations
+        - concrete operational actions
+        - deep causal reasoning
         
         User Query: "{query}"
         Category Routed: {category}
@@ -965,63 +924,43 @@ class AgentOrchestrator:
         MANDATORY RESPONSE FORMAT — YOU MUST FOLLOW THIS STRUCTURE EXACTLY
         ════════════════════════════════════════════════════════════
 
-        Always structure your response using these FOUR parts in this exact order:
+        Always structure your response using these THREE parts in this exact order:
 
         **Requested Information / Summary**
-        Provide the direct, precise answer to the user's query.
-        - Use structured layouts for pricing comparisons, market trends, or supply chain checks (see rules below).
-        - Format other tabular database records as a clean Markdown table in this section.
-        - Keep weather or event queries overview extremely brief.
+        Provide the direct, thorough answer to the user's query.
+        - For weather, include current temperature, feels like temp, wind, humidity, and general sales impact (e.g. increase in cold items). Always render the weather condition metrics in a clean Markdown table with headers: | Condition | Temperature | Feels Like | Humidity | Wind Speed |
+        - For events, list events in a Markdown table containing: | Event | Date | Type | Projected Attendance |
+        - For low stock or inventory queries, list low-stock items in a Markdown table containing: | Product | Category | Current Stock | ROL | Avg. Daily Consumption | Days Left |
+        - For competitor pricing, list competitor products, prices, and links in a Markdown table containing: | Competitor | Price | Product |
+        - For economic trends/CPI, list trend data in a Markdown table containing: | Date | CPI Value | Trend Analysis |
+        - For recalls or supply chain, state clearly what was verified or found.
+        - Format other tabular database records as a clean Markdown table.
 
         **Business Impact**
-        Provide a list of at most 1 or 2 high-level bullet points detailing the most critical business implications. Focus strictly on what matters.
-        For each bullet point, write a bold category/operational label, followed by a colon and a very short explanation (max 10–12 words max) explaining *how* and *why* this area is impacted based on the current context.
+        Detail the business implications of this query. Write 3-5 comprehensive, high-level, and deeply analytical bullet points.
+        For each bullet point, start with a bold operational label (e.g. **Beverage demand**, **Foot traffic surge**, **Staffing needs**, **Pricing competitiveness**, **Category shifts**, **Stockout risk**, **Promotional planning**, **Inventory risk**), followed by a colon and a detailed, contextual explanation of the impact and its operational rationale.
 
         **Recommended Actions**
-        Provide clear, prioritized next steps. Group them into logical subheadings:
-        
-        1. **Restocking Priorities**:
-           - Suggest restocking priorities in a single, high-level bullet point.
-           - If low-stock items are explicitly relevant to the query context, list them using a short Markdown Table (max 3 items):
-             | Product | Category | Current Stock | ROL | Contextual Suggestion |
-             Each "Contextual Suggestion" must be a very short sentence (max 10 words) connecting low stock to the query context.
-             
-        2. **Displays & Positioning** (ONLY include if weather or events demand changes; otherwise, omit entirely):
-           - Suggest a single high-level display adjustment in a single short bullet point (max 12 words). Do NOT mention any operational hours or timings.
-           
-        3. **Staffing** (ONLY include if weather or events demand changes; otherwise, omit entirely):
-           - Suggest a single high-level staffing recommendation in a single short bullet point (max 12 words). Do NOT mention any operational hours or timings.
+        Provide prioritized next steps. Group them into subheadings when relevant:
+        - **Restocking Priorities**: Tell them which items to restock immediately or monitor. Always represent restocking recommendations in a Markdown Table containing: | Product | Category | Current Stock | ROL | Contextual Suggestion |
+        - **Displays & Positioning** (ONLY include if weather or events demand changes; otherwise, omit entirely): Suggest specific display adjustments or promotional bundles.
+        - **Staffing** (ONLY include if weather or events demand changes; otherwise, omit entirely): Suggest concrete staffing shifts, including specific hours, days, or timeframes (e.g., "Schedule additional checkout staff during peak hours (12 PM–3 PM)").
 
-        *[Close with a single italicised call-to-action question dynamically tailored to the user's specific query and response content.]*
+        Close with a dynamic call-to-action question, e.g. *Would you like me to generate a restock order for these items?* or *Would you like to adjust promotional displays or staffing schedules for this event?* or similar.
 
         ════════════════════════════════════════════════════════════
-        ADDITIONAL RULES (apply on top of the format above)
+        CRITICAL OPERATIONAL RULES (AI AS AN ADVISOR)
         ════════════════════════════════════════════════════════════
-        - CONFLICT RESOLUTION: Always use exact numbers from 'DB Execution Results'. Never alter or guess figures.
-        - Do NOT show SQL code or reference internal system details.
-        - Do NOT reference "right panel", "Analytics Panel", or any external dashboard.
-        - Do NOT wrap the response in code fences.
-        - SECTION HEADERS: Use bold markdown (`**Section Name**`) — never use `###` headings for section titles.
-        - CONCISENESS: Keep the entire response extremely brief (typically under 150-250 words total). Never write more than 2 consecutive sentences of plain paragraph text. Ensure all bullet points and table cell entries are short, direct, and punchy.
-        - NO TIMINGS: Never mention specific timings, hours, or timeframes for staffing or positioning. Focus strictly on high-level recommendations.
-        - NO SPECULATION: Unless the provided database results or tool context explicitly contain specific numbers or percentages, NEVER invent or speculate percentages/statistics (e.g. do NOT invent "ice sales up 20%"). Use qualitative terms like "expected to increase demand for cold beverages" instead.
-        - COMPETITOR PRICING COMPARISON: Format pricing comparisons exactly like this structure instead of using prose:
-          Your Price: $[Your price]
-          [Competitor Name]: $[Competitor price]
-          Difference: [+$Diff / -$Diff]
-          Recommendation: [Maintain price / Reduce to $X.XX / etc.]
-        - MARKET TRENDS: Never output generic statements like "CPI increased". State the exact change (e.g. "CPI increased 0.4%") and link it directly to a store operational action (e.g. "This may increase wholesale grocery costs. Monitor pricing for milk, bread, and beverages").
-        - SUPPLY CHAIN DISRUPTIONS: If no disruptions are found, do NOT say generic phrases like "No supply chain issues". Format the response as:
-          I checked:
-          - Vendor purchase orders
-          - News sources
-          - Product recalls
-          No active supply chain disruption was found for your current inventory.
-        - CAUSAL RULE: If "causally_related" is FALSE in the Business Context Engine block, keep Recommended Actions strictly focused on the query topic. Do NOT append weather/event/low-stock refill recommendations.
-        - WEATHER QUERIES (causally_related=true): If hot (>22°C) or clear, recommend cold beverages, water, ice. If cold (<10°C) or rainy/snowy, recommend hot drinks, food, or automotive antifreeze.
-        - EVENT QUERIES (causally_related=true): High-attendance events drive grab-and-go demand (energy drinks, snacks, sandwiches).
-        - SENSOR WARNINGS: If IoT sensor readings exceed safe limits, flag them with a Warning label.
+        1. BE PRESCRIPTIVE: Do NOT use passive questions or tentative phrases like "Would you like to adjust displays?" or "Consider matching prices...". Instead, write strong, direct operational decisions: "Move cold beverages near the entrance.", "Bundle promotions (Buy 2, Get 1 free).", "Schedule 2 additional checkout staff for the evening shift (6 PM–11 PM)."
+        2. CONNECT THE DOTS (CROSS-TOOL SYNTHESIS): Do not just list tool outputs. Connect them causally. For example, if today's weather is hot, immediately explain how it affects the low-stock items in the inventory table (e.g., "Restock Dr Pepper urgently because the hot temperature will spike cold drink demand").
+        3. NO TIMINGS BAN: You are explicitly allowed and encouraged to recommend specific times, hours, or timeframes for staffing or positioning (e.g. 12 PM - 3 PM, evening shift, etc.) based on event/weather peaks.
+        4. OMIT IRRELEVANT SECTIONS: As in V2, if the query is not related to weather or events, do NOT include Displays/Positioning or Staffing sections. Omit them entirely to prevent clutter.
+        5. CONFLICT RESOLUTION: Always use exact numbers from 'DB Execution Results'. Never alter or guess figures.
+        6. Do NOT show SQL code or reference internal system details.
+        7. Do NOT wrap the response in code fences.
+        8. SECTION HEADERS: Use bold markdown (`**Section Name**`) — never use `###` headings for section titles.
         """
+
         res = await self.llm.ainvoke(synthesis_prompt)
         final_answer = res.content.strip()
         
@@ -1379,10 +1318,6 @@ class AgentOrchestrator:
                         })
                     tools_used.append("SOP Guidelines")
                 
-                elif step_agent == "live":
-                    live_results_list.append(self.get_live_sensor_readings())
-                    tools_used.append("IoT Sensors")
-            
             # Combine all results
             if db_results_list:
                 db_results = {
@@ -1436,17 +1371,6 @@ class AgentOrchestrator:
                 print(f"      Content Preview: {doc['content'][:150]}...")
             print(f"=================================================\n")
  
-        # Live IoT Agent
-        elif category == "live":
-            yield json.dumps({"type": "step", "message": "Reading real-time IoT sensors..."})
-            live_results = self.get_live_sensor_readings()
-            tools_used.append("IoT Sensors")
-            
-            # Print the tool results directly to the terminal for tracking
-            print(f"\n[TRACKING] === LIVE IoT AGENT TOOL RESULT (STREAM) ===")
-            print(f"IoT Sensors: {live_results.get('sensors')}")
-            print(f"Local Weather: {live_results.get('weather')}")
-            print(f"======================================================\n")
 
         # External Agent
         elif category == "external":
@@ -1557,19 +1481,6 @@ class AgentOrchestrator:
                 print(f"Result Preview: {str(external_results)[:300]}...")
                 print(f"==================================================================\n")
 
-        # Workflow Agent
-        elif category == "workflow":
-            yield json.dumps({"type": "step", "message": "Logging workflow transaction..."})
-            if "reorder" in query.lower() or "order" in query.lower():
-                workflow_executed = "Draft Purchase Order created. Assigned ID 'PO-99120'. Items matched to reorder quantities (ROQ). Final manager signature required in ERP/SAP."
-            else:
-                workflow_executed = "Escalation ticket generated: 'Vendor Delivery Issue VND-001' logged in operations log under ID 'TKT-82190'."
-            tools_used.append("Workflow Tool")
-            
-            # Print the tool results directly to the terminal for tracking
-            print(f"\n[TRACKING] === WORKFLOW AGENT TOOL RESULT (STREAM) ===")
-            print(f"Workflow Action Executed: {workflow_executed}")
-            print(f"=====================================================\n")
 
         # Final Synthesis
         yield json.dumps({"type": "step", "message": "Synthesizing response..."})
@@ -1586,10 +1497,17 @@ class AgentOrchestrator:
             else:
                 table_data = [db_results["headers"]] + db_results["rows"]
 
+
+
         synthesis_prompt = f"""
         You are the **AI Assistant** — a conversational, multi-level Agentic AI System primarily focused on supporting BP store managers, operations advisors, and vendor managers.
-        You are capable of: Answer, Analyze, Compare, Predict, Recommend, Execute, Monitor, and Notify.
         Respond to the user's store operations query based on the fetched context, history context, execution details, and business context analysis.
+        
+        Your goal is to act as an **assertive, highly intelligent business advisor (BP Store Manager)**. Managers don't just need information; they need:
+        - clear priorities
+        - strong, prescriptive recommendations
+        - concrete operational actions
+        - deep causal reasoning
         
         User Query: "{query}"
         Category Routed: {category}
@@ -1612,62 +1530,41 @@ class AgentOrchestrator:
         MANDATORY RESPONSE FORMAT — YOU MUST FOLLOW THIS STRUCTURE EXACTLY
         ════════════════════════════════════════════════════════════
 
-        Always structure your response using these FOUR parts in this exact order:
+        Always structure your response using these THREE parts in this exact order:
 
         **Requested Information / Summary**
-        Provide the direct, precise answer to the user's query.
-        - Use structured layouts for pricing comparisons, market trends, or supply chain checks (see rules below).
-        - Format other tabular database records as a clean Markdown table in this section.
-        - Keep weather or event queries overview extremely brief.
+        Provide the direct, thorough answer to the user's query.
+        - For weather, include current temperature, feels like temp, wind, humidity, and general sales impact (e.g. increase in cold items). Always render the weather condition metrics in a clean Markdown table with headers: | Condition | Temperature | Feels Like | Humidity | Wind Speed |
+        - For events, list events in a Markdown table containing: | Event | Date | Type | Projected Attendance |
+        - For low stock or inventory queries, list low-stock items in a Markdown table containing: | Product | Category | Current Stock | ROL | Avg. Daily Consumption | Days Left |
+        - For competitor pricing, list competitor products, prices, and links in a Markdown table containing: | Competitor | Price | Product |
+        - For economic trends/CPI, list trend data in a Markdown table containing: | Date | CPI Value | Trend Analysis |
+        - For recalls or supply chain, state clearly what was verified or found.
+        - Format other tabular database records as a clean Markdown table.
 
         **Business Impact**
-        Provide a list of at most 1 or 2 high-level bullet points detailing the most critical business implications. Focus strictly on what matters.
-        For each bullet point, write a bold category/operational label, followed by a colon and a very short explanation (max 10–12 words max) explaining *how* and *why* this area is impacted based on the current context.
+        Detail the business implications of this query. Write 3-5 comprehensive, high-level, and deeply analytical bullet points.
+        For each bullet point, start with a bold operational label (e.g. **Beverage demand**, **Foot traffic surge**, **Staffing needs**, **Pricing competitiveness**, **Category shifts**, **Stockout risk**, **Promotional planning**, **Inventory risk**), followed by a colon and a detailed, contextual explanation of the impact and its operational rationale.
 
         **Recommended Actions**
-        Provide clear, prioritized next steps. Group them into logical subheadings:
-        
-        1. **Restocking Priorities**:
-           - Suggest restocking priorities in a single, high-level bullet point.
-           - If low-stock items are explicitly relevant to the query context, list them using a short Markdown Table (max 3 items):
-             | Product | Category | Current Stock | ROL | Contextual Suggestion |
-             Each "Contextual Suggestion" must be a very short sentence (max 10 words) connecting low stock to the query context.
-             
-        2. **Displays & Positioning** (ONLY include if weather or events demand changes; otherwise, omit entirely):
-           - Suggest a single high-level display adjustment in a single short bullet point (max 12 words). Do NOT mention any operational hours or timings.
-           
-        3. **Staffing** (ONLY include if weather or events demand changes; otherwise, omit entirely):
-           - Suggest a single high-level staffing recommendation in a single short bullet point (max 12 words). Do NOT mention any operational hours or timings.
+        Provide prioritized next steps. Group them into subheadings when relevant:
+        - **Restocking Priorities**: Tell them which items to restock immediately or monitor. Always represent restocking recommendations in a Markdown Table containing: | Product | Category | Current Stock | ROL | Contextual Suggestion |
+        - **Displays & Positioning** (ONLY include if weather or events demand changes; otherwise, omit entirely): Suggest specific display adjustments or promotional bundles.
+        - **Staffing** (ONLY include if weather or events demand changes; otherwise, omit entirely): Suggest concrete staffing shifts, including specific hours, days, or timeframes (e.g., "Schedule additional checkout staff during peak hours (12 PM–3 PM)").
 
-        *[Close with a single italicised call-to-action question dynamically tailored to the user's specific query and response content.]*
+        Close with a dynamic call-to-action question, e.g. *Would you like me to generate a restock order for these items?* or *Would you like to adjust promotional displays or staffing schedules for this event?* or similar.
 
         ════════════════════════════════════════════════════════════
-        ADDITIONAL RULES (apply on top of the format above)
+        CRITICAL OPERATIONAL RULES (AI AS AN ADVISOR)
         ════════════════════════════════════════════════════════════
-        - CONFLICT RESOLUTION: Always use exact numbers from 'DB Execution Results'. Never alter or guess figures.
-        - Do NOT show SQL code or reference internal system details.
-        - Do NOT reference "right panel", "Analytics Panel", or any external dashboard.
-        - Do NOT wrap the response in code fences.
-        - SECTION HEADERS: Use bold markdown (`**Section Name**`) — never use `###` headings for section titles.
-        - CONCISENESS: Keep the entire response extremely brief (typically under 150-250 words total). Never write more than 2 consecutive sentences of plain paragraph text. Ensure all bullet points and table cell entries are short, direct, and punchy.
-        - NO TIMINGS: Never mention specific timings, hours, or timeframes for staffing or positioning. Focus strictly on high-level recommendations.
-        - NO SPECULATION: Unless the provided database results or tool context explicitly contain specific numbers or percentages, NEVER invent or speculate percentages/statistics (e.g. do NOT invent "ice sales up 20%"). Use qualitative terms like "expected to increase demand for cold beverages" instead.
-        - COMPETITOR PRICING COMPARISON: Format pricing comparisons exactly like this structure instead of using prose:
-          Your Price: $[Your price]
-          [Competitor Name]: $[Competitor price]
-          Difference: [+$Diff / -$Diff]
-          Recommendation: [Maintain price / Reduce to $X.XX / etc.]
-        - MARKET TRENDS: Never output generic statements like "CPI increased". State the exact change (e.g. "CPI increased 0.4%") and link it directly to a store operational action (e.g. "This may increase wholesale grocery costs. Monitor pricing for milk, bread, and beverages").
-        - SUPPLY CHAIN DISRUPTIONS: If no disruptions are found, do NOT say generic phrases like "No supply chain issues". Format the response as:
-          I checked:
-          - Vendor purchase orders
-          - News sources
-          - Product recalls
-          No active supply chain disruption was found for your current inventory.
-        - CAUSAL RULE: If "causally_related" is FALSE in the Business Context Engine block, keep Recommended Actions strictly focused on the query topic. Do NOT append weather/event/low-stock refill recommendations.
-        - WEATHER QUERIES (causally_related=true): If hot (>22°C) or clear, recommend cold beverages, water, ice. If cold (<10°C) or rainy/snowy, recommend hot drinks, food, or automotive antifreeze.
-        - EVENT QUERIES (causally_related=true): High-attendance events drive grab-and-go demand (energy drinks, snacks, sandwiches).
-        - SENSOR WARNINGS: If IoT sensor readings exceed safe limits, flag them with a Warning label.
+        1. BE PRESCRIPTIVE: Do NOT use passive questions or tentative phrases like "Would you like to adjust displays?" or "Consider matching prices...". Instead, write strong, direct operational decisions: "Move cold beverages near the entrance.", "Bundle promotions (Buy 2, Get 1 free).", "Schedule 2 additional checkout staff for the evening shift (6 PM–11 PM)."
+        2. CONNECT THE DOTS (CROSS-TOOL SYNTHESIS): Do not just list tool outputs. Connect them causally. For example, if today's weather is hot, immediately explain how it affects the low-stock items in the inventory table (e.g., "Restock Dr Pepper urgently because the hot temperature will spike cold drink demand").
+        3. NO TIMINGS BAN: You are explicitly allowed and encouraged to recommend specific times, hours, or timeframes for staffing or positioning (e.g. 12 PM - 3 PM, evening shift, etc.) based on event/weather peaks.
+        4. OMIT IRRELEVANT SECTIONS: As in V2, if the query is not related to weather or events, do NOT include Displays/Positioning or Staffing sections. Omit them entirely to prevent clutter.
+        5. CONFLICT RESOLUTION: Always use exact numbers from 'DB Execution Results'. Never alter or guess figures.
+        6. Do NOT show SQL code or reference internal system details.
+        7. Do NOT wrap the response in code fences.
+        8. SECTION HEADERS: Use bold markdown (`**Section Name**`) — never use `###` headings for section titles.
         """
 
         full_text = ""
